@@ -1,0 +1,194 @@
+#!/bin/zsh
+# zsh http server
+
+zmodload zsh/net/tcp
+zmodload zsh/stat
+
+DOCROOT="$PWD"
+PORT="8000"
+
+function http_listen() {
+    ztcp -l -v $PORT || exit
+    listenfd=$REPLY
+    ztcp -v -a $listenfd
+    fd=$REPLY
+}
+
+typeset -A headers
+
+function parse_header() {
+    read -r -u $fd method url version    
+    headers["method"]=$method
+    headers["url"]=$url
+    headers["version"]=$version
+
+    read -r -u $fd key value
+    while [[ key != $'\r' ]] && [[ -n $value ]]; do
+        headers[${key%$'\r'}]=${value%$'\r'}
+        read -r -u $fd key value
+    done 
+}
+
+function return_header() {
+    print -n "HTTP/1.1 $1\r\n"
+    print -n "Connection: keep-alive\r\n"
+    print -n "Content-Type: $2\r\n"
+    print -n "Date: $(date -u +"%a, %d %b %Y %H:%M:%S") GMT"
+    print -n "Server: czhttpd\r\n"
+    for i v in "$@[3,-1]"; do
+        print -n "$i: $v\r\n"
+    done
+    print -n "\r\n"
+}
+
+function error_header() {
+    case "$1" in
+        (404)
+            message="404 Not Found";;
+        (501)
+            message="Not Implemented";;
+    esac
+
+    return_header "$message" text/plain Content-Length ${#message}
+    print "$message"
+}
+            
+            
+
+function html_template() {
+cat <<EOF
+<!DOCTYPE html>
+<html>
+<head>
+<style type="text/css">
+a {text-decoration: none;}
+table {
+border-top: 1px solid black;
+border-bottom: 1px solid black;
+font: 90% monospace;
+border-collapse: collapse;
+margin: 4px; }
+th { padding-top: 4px; padding-bottom: 6px; text-align: left; }
+thead th:nth-child(2) { text-align: right; padding-right: 12px; }
+tbody td:nth-child(2) { text-align: right; padding-right: 12px; }
+tbody td:first-child { padding-right: 30px; }
+tbody tr:hover { background: rgba(0,0,0,0.3); color: #fff; cursor: pointer; }
+</style>
+<title>czhttpd</title>
+</head>
+
+<body>
+<h1>Index of $1</h1>
+<table padding=10>
+    <thead>
+    <tr>
+        <th>Name</th>
+        <tsize>
+        <th>Size</th>
+        </tsize>
+        <th>Type</th>
+    </tr>
+    </thead>
+    <tbody>
+    $@[2,-1]
+    </tbody>
+</table>
+</body>
+</html>
+EOF
+}
+
+function mime_type() {
+    if [[ -f $1 ]]; then
+        case "$1" in
+            (*.sh)
+                print "text/plain";;
+            (*)
+                type=$(file --mime-type -bL $1)
+                print ${type#'application/x-executable'};;
+        esac
+    elif [[ -d $1 ]]; then
+        print "Directory"
+    fi
+}
+
+function calc_size() {
+    [[ ! -f $1 ]] && { print "..." && return }
+
+    KB=1024.0
+    MB=1048576.0
+    GB=1073741824.0
+    
+    size=$(stat -L +size $1)
+
+    (( $size < $KB )) && { printf '%.1f%s\n' "${size}" "B" && return }
+    (( $size < $MB )) && { printf '%.1f%s\n' "$((size/$KB))" "K" && return }
+    (( $size < $GB )) && { printf '%.1f%s\n' "$((size/$MB))" "M" && return }
+    (( $size > $GB )) && { printf '%.1f%s\n' "$((size/$GB))" "G" && return }
+}
+ 
+function list_dir() {
+    local -a all files
+
+    for i in $1/*(r); do
+        [[ -d "$i" ]] && { dir+="$i" && continue }
+        files+="$i"
+    done
+
+    for i in $dir $files; do
+        # This is ridiculously ugly, please rewrite
+        i_pwd="${${i%/*}#$DOCROOT}"
+        print "<tr><td><a href="${i//\/*\//$i_pwd:t/}">${i:t}</a></td>"
+        print "<td>$(calc_size $i)</td>"
+        print "<td>$(mime_type $i)</td></tr>"
+    done
+}
+
+function send_file() {
+    local -a array
+
+    stat -H array $1
+    mimetype=$(mime_type $1)
+
+    return_header "200 Ok" $mimetype Content-Length $array[size]
+    cat $1 
+}
+
+function chunk() {
+    printf '%x\r\n' "${#1}"
+    printf '%s\r\n' "$1"
+    printf '%x\r\n' "0"
+    printf '\r\n'
+}
+
+function srv() {
+    [[ $headers["method"] != "GET" ]] && error_header 501 >&$fd
+
+    pathname=$DOCROOT$headers["url"]
+    if [[ -d "$pathname" ]]; then
+        if [[ -f $pathname/index.html ]]; then
+            send_file $pathname/index.html >&$fd
+        else
+            return_header "200 Ok" text/html Transfer-Encoding chunked >&$fd
+            chunk "$(html_template $pathname $(list_dir $pathname))" >&$fd
+        fi
+    elif [[ -f "$pathname" ]]; then
+        send_file $pathname >&$fd
+    else
+        error_header 404 >&$fd
+    fi
+}
+
+# Main
+trap "print Goodbye; ztcp -c $fd; ztcp -c $listenfd; exit" INT KILL TERM
+
+http_listen
+
+while true; do
+    parse_header
+    srv
+    [[ headers[Connection:] =~ "close|Close" ]] && break
+done
+
+ztcp -L
+ztcp -c $fd; ztcp -c $listenfd
