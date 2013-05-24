@@ -5,7 +5,7 @@ zmodload zsh/net/tcp
 zmodload zsh/stat
 
 DOCROOT="$PWD"
-PORT="8000"
+[[ -n "$2" ]] && PORT="$2" || PORT=8000
 
 function http_listen() {
     ztcp -l -v $PORT || exit
@@ -113,7 +113,7 @@ function mime_type() {
 }
 
 function calc_size() {
-    [[ ! -f $1 ]] && { print "..." && return }
+    [[ -d "$1" ]] && { print "-" && return }
 
     KB=1024.0
     MB=1048576.0
@@ -128,17 +128,8 @@ function calc_size() {
 }
  
 function list_dir() {
-    local -a all files
-
-    for i in $1/*(r); do
-        [[ -d "$i" ]] && { dir+="$i" && continue }
-        files+="$i"
-    done
-
-    for i in $dir $files; do
-        # This is ridiculously ugly, please rewrite
-        i_pwd="${${i%/*}#$DOCROOT}"
-        print "<tr><td><a href="${i//\/*\//$i_pwd:t/}">${i:t}</a></td>"
+    for i in "$1"/*(r); do
+        print "<tr><td><a href="${${i#$DOCROOT}[(ws:/:)-2,-1]}">${i##*/}</a></td>"
         print "<td>$(calc_size $i)</td>"
         print "<td>$(mime_type $i)</td></tr>"
     done
@@ -164,7 +155,7 @@ function chunk() {
 function srv() {
     [[ $headers["method"] != "GET" ]] && error_header 501 >&$fd
 
-    pathname=$DOCROOT$headers["url"]
+    pathname=${DOCROOT%/}$headers["url"]
     if [[ -d "$pathname" ]]; then
         if [[ -f $pathname/index.html ]]; then
             send_file $pathname/index.html >&$fd
