@@ -3,21 +3,31 @@
 
 zmodload zsh/net/tcp
 zmodload zsh/stat
+zmodload zsh/datetime
+
+export TZ=UTC
 
 DOCROOT="$PWD"
 [[ -n "$2" ]] && PORT="$2" || PORT=8000
 
+error() {
+    print "Error: $*" >&2
+    ztcp -c
+    exit 113
+}
+
 function http_listen() {
-    ztcp -l -v $PORT || exit
+    ztcp -l -v $PORT || error "Port $PORT in use."
     listenfd=$REPLY
-    ztcp -v -a $listenfd
+
+    ztcp -v -a $listenfd || error "Could not connect."
     fd=$REPLY
 }
 
 typeset -A headers
 
 function parse_header() {
-    read -r -u $fd method url version    
+    read -r -u $fd method url version
     headers["method"]=$method
     headers["url"]=$url
     headers["version"]=$version
@@ -32,8 +42,8 @@ function parse_header() {
 function return_header() {
     print -n "HTTP/1.1 $1\r\n"
     print -n "Connection: keep-alive\r\n"
-    print -n "Content-Type: $2\r\n"
-    print -n "Date: $(date -u +"%a, %d %b %Y %H:%M:%S") GMT"
+    print -n "Content-Type: $2; charset=UTF-8\n\r"
+    print -n "Date: $(strftime "%a, %d %b %Y %H:%M:%S" $EPOCHSECONDS) GMT\r\n"
     print -n "Server: czhttpd\r\n"
     for i v in "$@[3,-1]"; do
         print -n "$i: $v\r\n"
@@ -59,16 +69,17 @@ function html_template() {
 cat <<EOF
 <!DOCTYPE html>
 <html>
+<meta charset='utf-8'>
 <head>
 <style type="text/css">
 a {text-decoration: none;}
-table {
-border-top: 1px solid black;
-border-bottom: 1px solid black;
-font: 90% monospace;
-border-collapse: collapse;
+table { 
+border-top: 1px solid black; 
+border-bottom: 1px solid black; 
+font: 90% monospace; 
+border-collapse: collapse; 
 margin: 4px; }
-th { padding-top: 4px; padding-bottom: 6px; text-align: left; }
+thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; }
 thead th:nth-child(2) { text-align: right; padding-right: 12px; }
 tbody td:nth-child(2) { text-align: right; padding-right: 12px; }
 tbody td:first-child { padding-right: 30px; }
@@ -94,8 +105,17 @@ tbody tr:hover { background: rgba(0,0,0,0.3); color: #fff; cursor: pointer; }
     </tbody>
 </table>
 </body>
+</meta>
 </html>
 EOF
+}
+
+function urlencode() {
+    perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$1"
+}
+
+function urldecode() {
+    perl -MURI::Escape -e 'print uri_unescape($ARGV[0]);' "$1"
 }
 
 function mime_type() {
@@ -113,7 +133,7 @@ function mime_type() {
 }
 
 function calc_size() {
-    [[ -d "$1" ]] && { print "-" && return }
+    [[ -d "$1" ]] && { print "\-" && return }
 
     KB=1024.0
     MB=1048576.0
@@ -128,8 +148,18 @@ function calc_size() {
 }
  
 function list_dir() {
-    for i in "$1"/*(r); do
-        print "<tr><td><a href="${${i#$DOCROOT}[(ws:/:)-2,-1]}">${i##*/}</a></td>"
+    local -a dir files
+    local_dir=${1:/\/\//\//}
+
+    for i in "$local_dir"/*(r); do
+        [[ -d "$i" ]] && { dir+="${i}" && continue }
+        files+="$i"
+    done
+
+    # Still ugly and slow    
+    for i in $dir $files; do
+        i_pwd="${${i#$DOCROOT}:h}"
+        print "<tr><td><a href="$(urlencode ${i_pwd:t})/$(urlencode ${i:t})">${i:t}</a></td>"
         print "<td>$(calc_size $i)</td>"
         print "<td>$(mime_type $i)</td></tr>"
     done
@@ -146,27 +176,27 @@ function send_file() {
 }
 
 function chunk() {
-    printf '%x\r\n' "${#1}"
+    printf '%x\r\n' "$(expr "x$1" : '.*' - 1)"
     printf '%s\r\n' "$1"
     printf '%x\r\n' "0"
     printf '\r\n'
 }
 
 function srv() {
-    [[ $headers["method"] != "GET" ]] && error_header 501 >&$fd
+    [[ $headers["method"] != "GET" ]] && error_header 501 
 
-    pathname=${DOCROOT%/}$headers["url"]
+    pathname=${DOCROOT}$(urldecode $headers["url"])
     if [[ -d "$pathname" ]]; then
         if [[ -f $pathname/index.html ]]; then
-            send_file $pathname/index.html >&$fd
+            send_file $pathname/index.html 
         else
-            return_header "200 Ok" text/html Transfer-Encoding chunked >&$fd
-            chunk "$(html_template $pathname $(list_dir $pathname))" >&$fd
+            return_header "200 Ok" text/html Transfer-Encoding chunked 
+            chunk "$(html_template $pathname $(list_dir $pathname))" 
         fi
     elif [[ -f "$pathname" ]]; then
-        send_file $pathname >&$fd
+        send_file $pathname
     else
-        error_header 404 >&$fd
+        error_header 404 
     fi
 }
 
@@ -177,8 +207,7 @@ http_listen
 
 while true; do
     parse_header
-    srv
-    [[ headers[Connection:] =~ "close|Close" ]] && break
+    srv >&$fd
 done
 
 ztcp -L

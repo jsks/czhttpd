@@ -5,6 +5,5 @@ This is *not* intended for serious use. Just a toy that I've been playing with t
 TODO:
 - Canonicalize paths properly
     - Navigate up to parent
-    - Fix for files with spaces?
 - zparseopts: better configuration
 - error handling & logging
