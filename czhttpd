@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env zsh
 # zsh http server
 
 zmodload zsh/net/tcp
@@ -69,7 +69,6 @@ function html_template() {
 cat <<EOF
 <!DOCTYPE html>
 <html>
-<meta charset='utf-8'>
 <head>
 <style type="text/css">
 a {text-decoration: none;}
@@ -105,7 +104,6 @@ tbody tr:hover { background: rgba(0,0,0,0.3); color: #fff; cursor: pointer; }
     </tbody>
 </table>
 </body>
-</meta>
 </html>
 EOF
 }
@@ -149,20 +147,22 @@ function calc_size() {
  
 function list_dir() {
     local -a dir files
-    local_dir=${1:/\/\//\//}
+    cd "$1"
 
-    for i in "$local_dir"/*(r); do
-        [[ -d "$i" ]] && { dir+="${i}" && continue }
+    [[ "${1%/}" != "${DOCROOT%/}" ]] && dir+="/../"
+
+    for i in ./*(r); do
+        [[ -d "$i" ]] && { dir+="${i}/" && continue }
         files+="$i"
     done
 
-    # Still ugly and slow    
     for i in $dir $files; do
-        i_pwd="${${i#$DOCROOT}:h}"
-        print "<tr><td><a href="$(urlencode ${i_pwd:t})/$(urlencode ${i:t})">${i:t}</a></td>"
+        print "<tr><td><a href=\"${i#*/}\">${i:t}</a></td>"
         print "<td>$(calc_size $i)</td>"
         print "<td>$(mime_type $i)</td></tr>"
     done
+
+    cd - 
 }
 
 function send_file() {
