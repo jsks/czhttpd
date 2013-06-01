@@ -10,8 +10,9 @@ typeset -A header
 typeset -a pids
 
 # Defaults
-DEF_PORT=8000   # Port
+DEF_PORT=8080   # Port
 DEF_CONNS=2     # Max Connections
+DEF_TIME=90     # TCP Timeout
 
 # Functions
 function error() {
@@ -25,8 +26,9 @@ cat <<EOF
 Usage: czhttpd [OPTIONS] <optional file or dir>
 
 Options:
-    -p :    Port to bind to (default 8000).
+    -p :    Port to bind to (default 8080).
     -c :    Max number of connections to accept (default 2).
+    -t :    Connection timeout in seconds (default 60).
     -h :    Print this help message.
 
 czhttpd can optionally serve a given file or directory, otherwise the current
@@ -37,15 +39,17 @@ exit
 }
 
 function parse_conf() {
-    zparseopts -K -D -A OPTS p: c: h::
+    zparseopts -K -D -A OPTS p: c: t: h::
 
     [[ -n ${(kM)OPTS:#-h} ]] && help
 
-    [[ -n $OPTS[-c] ]] && { [[ $OPTS[-c] == <->  ]] || error "$OPTS[-c] is not a valid integer." }
-    MAX_CONNECTIONS=${OPTS[-c]:-$DEF_CONNS}
+    for i in $OPTS; do
+        [[ $i != <-> ]] && error "$i is not a valid integer"
+    done
 
-    [[ -n $OPTS[-p] ]] && { [[ $OPTS[-p] == <-> ]] || error "$OPTS[-p] is not a valid port" }
+    MAX_CONNECTIONS=${OPTS[-c]:-$DEF_CONNS}
     PORT=${OPTS[-p]:-$DEF_PORT}
+    TIMEOUT=${OPTS[-t]:-$DEF_TIME}
 
     if [[ -n $1 ]]; then
         [[ -e $1 ]] || error "$1 is not a valid directory or file."
@@ -62,7 +66,7 @@ function http_listen() {
 
 
 function parse_header() {
-    read -r -u $fd method url version
+    read -t $TIMEOUT -r -u $fd method url version || return 1
     header[method]=$method
     header[url]=$url
     header[version]=$version
@@ -71,7 +75,9 @@ function parse_header() {
     while [[ key != $'\r' ]] && [[ -n $value ]]; do
         header[${key%$'\r'}]=${value%$'\r'}
         read -r -u $fd key value
-    done 
+    done
+
+    return 0
 }
 
 function return_header() {
@@ -98,8 +104,6 @@ function error_header() {
     print "$message"
 }
             
-            
-
 function html_template() {
 cat <<EOF
 <!DOCTYPE html>
@@ -225,7 +229,7 @@ function srv() {
     [[ $header[method] != "GET" ]] && { error_header 501; return 1 }
     [[ $header[url] == "/favicon.ico" ]] && { return_header "200 Ok" text/html Content-Length 0; return }
 
-    pathname="${DOCROOT}$(urldecode $header[url])"
+    pathname="${DOCROOT}${$(urldecode $header[url])%/}"
     if [[ -d "$pathname" ]]; then
         if [[ -f $pathname/index.html ]]; then
             send_file $pathname/index.html 
@@ -268,14 +272,16 @@ for ((j=0; j<$MAX_CONNECTIONS; j++)); do
     fd=$REPLY
     while true; do
         parse_header
-        [[ -z $header[method] || $header[Connection:] == closed ]] && break
+        [[ $? == 1 || $header[Connection:] == closed ]] && break
         srv >&$fd
     done
 
-    ztcp -c ) &
+    ztcp -c $fd ) &
 
     pids+=$!
 done
 
 wait
+
+print "Exiting..."
 ztcp -c; exit

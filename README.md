@@ -9,5 +9,4 @@ TODO:
 - Logging
 - Better support for multiple connections
     - Recycle closed connections
-- Timeout to close connection
 - Better handling of child processes && exiting
