@@ -6,35 +6,70 @@ zmodload zsh/stat
 zmodload zsh/datetime
 
 export TZ=UTC
+typeset -A header
+typeset -a pids
 
-DOCROOT="$PWD"
-[[ -n "$2" ]] && PORT="$2" || PORT=8000
+# Defaults
+DEF_PORT=8000   # Port
+DEF_CONNS=2     # Max Connections
 
-error() {
+# Functions
+function error() {
     print "Error: $*" >&2
     ztcp -c
     exit 113
 }
 
-function http_listen() {
-    ztcp -l -v $PORT || error "Port $PORT in use."
-    listenfd=$REPLY
+function help() {
+cat <<EOF
+Usage: czhttpd [OPTIONS] <optional file or dir>
 
-    ztcp -v -a $listenfd || error "Could not connect."
-    fd=$REPLY
+Options:
+    -p :    Port to bind to (default 8000).
+    -c :    Max number of connections to accept (default 2).
+    -h :    Print this help message.
+
+czhttpd can optionally serve a given file or directory, otherwise the current
+working directory will be recursively served.
+EOF
+
+exit
 }
 
-typeset -A headers
+function parse_conf() {
+    zparseopts -K -D -A OPTS p: c: h::
+
+    [[ -n ${(kM)OPTS:#-h} ]] && help
+
+    [[ -n $OPTS[-c] ]] && { [[ $OPTS[-c] == <->  ]] || error "$OPTS[-c] is not a valid integer." }
+    MAX_CONNECTIONS=${OPTS[-c]:-$DEF_CONNS}
+
+    [[ -n $OPTS[-p] ]] && { [[ $OPTS[-p] == <-> ]] || error "$OPTS[-p] is not a valid port" }
+    PORT=${OPTS[-p]:-$DEF_PORT}
+
+    if [[ -n $1 ]]; then
+        [[ -e $1 ]] || error "$1 is not a valid directory or file."
+        DOCROOT="$1"
+    else
+        DOCROOT="$PWD"
+    fi
+}
+
+function http_listen() {
+    ztcp -lv $PORT 2>/dev/null || error "Could not bind to port $PORT"
+    listenfd=$REPLY
+}
+
 
 function parse_header() {
     read -r -u $fd method url version
-    headers["method"]=$method
-    headers["url"]=$url
-    headers["version"]=$version
+    header[method]=$method
+    header[url]=$url
+    header[version]=$version
 
     read -r -u $fd key value
     while [[ key != $'\r' ]] && [[ -n $value ]]; do
-        headers[${key%$'\r'}]=${value%$'\r'}
+        header[${key%$'\r'}]=${value%$'\r'}
         read -r -u $fd key value
     done 
 }
@@ -42,7 +77,7 @@ function parse_header() {
 function return_header() {
     print -n "HTTP/1.1 $1\r\n"
     print -n "Connection: keep-alive\r\n"
-    print -n "Content-Type: $2; charset=UTF-8\n\r"
+    print -n "Content-Type: $2; charset=UTF-8\r\n"
     print -n "Date: $(strftime "%a, %d %b %Y %H:%M:%S" $EPOCHSECONDS) GMT\r\n"
     print -n "Server: czhttpd\r\n"
     for i v in "$@[3,-1]"; do
@@ -72,12 +107,7 @@ cat <<EOF
 <head>
 <style type="text/css">
 a {text-decoration: none;}
-table { 
-border-top: 1px solid black; 
-border-bottom: 1px solid black; 
-font: 90% monospace; 
-border-collapse: collapse; 
-margin: 4px; }
+table { border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; border-collapse: collapse; margin: 4px; }
 thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; }
 thead th:nth-child(2) { text-align: right; padding-right: 12px; }
 tbody td:nth-child(2) { text-align: right; padding-right: 12px; }
@@ -86,7 +116,6 @@ tbody tr:hover { background: rgba(0,0,0,0.3); color: #fff; cursor: pointer; }
 </style>
 <title>czhttpd</title>
 </head>
-
 <body>
 <h1>Index of $1</h1>
 <table padding=10>
@@ -109,21 +138,31 @@ EOF
 }
 
 function urlencode() {
-    perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$1"
+    for i in ${(s::)1}; do
+        case "$i" in
+            ([-._~A-Za-z0-9])
+                printf '%s' "$i";;
+            (*)
+                printf '%%%02x' "'$i";;
+        esac
+    done
+
+    printf '\n'
 }
 
 function urldecode() {
-    perl -MURI::Escape -e 'print uri_unescape($ARGV[0]);' "$1"
+    printf '%b\n' "${1:gs/%/\\x}"
 }
 
 function mime_type() {
     if [[ -f $1 ]]; then
-        case "$1" in
-            (*.sh)
-                print "text/plain";;
+        case $1 in
+            (*.html)
+                print "text/html";;
             (*)
                 type=$(file --mime-type -bL $1)
-                print ${type#'application/x-executable'};;
+                [[ ${type:h} == text ]] && { print "text/plain" && continue }
+                print "${type#application/x-executable}";;
         esac
     elif [[ -d $1 ]]; then
         print "Directory"
@@ -151,13 +190,13 @@ function list_dir() {
 
     [[ "${1%/}" != "${DOCROOT%/}" ]] && dir+="/../"
 
-    for i in ./*(r); do
+    for i in ./*(Nr); do
         [[ -d "$i" ]] && { dir+="${i}/" && continue }
         files+="$i"
     done
 
     for i in $dir $files; do
-        print "<tr><td><a href=\"${i#*/}\">${i:t}</a></td>"
+        print "<tr><td><a href=\"${i#*/}\">${i#*/}</a></td>"
         print "<td>$(calc_size $i)</td>"
         print "<td>$(mime_type $i)</td></tr>"
     done
@@ -183,32 +222,60 @@ function chunk() {
 }
 
 function srv() {
-    [[ $headers["method"] != "GET" ]] && error_header 501 
+    [[ $header[method] != "GET" ]] && { error_header 501; return 1 }
+    [[ $header[url] == "/favicon.ico" ]] && { return_header "200 Ok" text/html Content-Length 0; return }
 
-    pathname=${DOCROOT}$(urldecode $headers["url"])
+    pathname="${DOCROOT}$(urldecode $header[url])"
     if [[ -d "$pathname" ]]; then
         if [[ -f $pathname/index.html ]]; then
             send_file $pathname/index.html 
         else
-            return_header "200 Ok" text/html Transfer-Encoding chunked 
+            return_header "200 Ok" text/html Transfer-Encoding chunked
             chunk "$(html_template $pathname $(list_dir $pathname))" 
         fi
     elif [[ -f "$pathname" ]]; then
         send_file $pathname
     else
-        error_header 404 
+        error_header 404
+        return 1
     fi
 }
 
-# Main
-trap "print Goodbye; ztcp -c $fd; ztcp -c $listenfd; exit" INT KILL TERM
+function cleanup() {
+    print "Exiting..."
 
+    if [[ -n $pids ]]; then
+        for i in $pids; do
+            [[ -f /proc/$i/exe ]] && kill $i
+        done
+    fi
+
+    ztcp -c; exit
+}
+
+
+# Main
+trap "cleanup" INT KILL TERM
+
+parse_conf $*
 http_listen
 
-while true; do
-    parse_header
-    srv >&$fd
+for ((j=0; j<$MAX_CONNECTIONS; j++)); do
+    ztcp -v -a $listenfd
+
+    ( trap "ztcp -c $fd; exit" KILL TERM
+
+    fd=$REPLY
+    while true; do
+        parse_header
+        [[ -z $header[method] || $header[Connection:] == closed ]] && break
+        srv >&$fd
+    done
+
+    ztcp -c ) &
+
+    pids+=$!
 done
 
-ztcp -L
-ztcp -c $fd; ztcp -c $listenfd
+wait
+ztcp -c; exit
