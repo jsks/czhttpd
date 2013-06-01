@@ -1,9 +1,13 @@
-czhttpd: simple http server written in zsh
+czhttpd: simple linux http server written in 99% pure zsh
 
-This is *not* intended for serious use. Just a toy that I've been playing with to see what I can do with zsh.
+This is *not* intended for serious use. It has terrible security and was never designed to be portable. Just a toy that I've been playing with to see what I can do with zsh.
+
+Requirements:
+- `file`
 
 TODO:
-- Canonicalize paths properly
-    - Navigate up to parent
-- zparseopts: better configuration
-- error handling & logging
+- Logging
+- Better support for multiple connections
+    - Recycle closed connections
+- Timeout to close connection
+- Better handling of child processes && exiting
