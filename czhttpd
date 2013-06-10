@@ -273,7 +273,7 @@ function cleanup() {
     done
 
     logger "> Exiting czhttpd"
-    exec {logfd}>&-; exec {fifofd}>&- {fifofd}<&-
+    exec {logfd}>&-; exec {fifofd}>&-
     rm $FIFO; ztcp -c; exit
 }
 
