@@ -4,6 +4,7 @@
 zmodload zsh/net/tcp
 zmodload zsh/stat
 zmodload zsh/datetime
+zmodload zsh/system
 zmodload zsh/zselect
 
 export TZ=UTC
