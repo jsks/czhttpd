@@ -272,7 +272,7 @@ function cleanup() {
         kill $i 2>/dev/null
     done
 
-    logger "> Exiting czhttpd"
+    logger "> Exiting main"
     exec {logfd}>&-; exec {fifofd}>&-
     rm $FIFO; ztcp -c; exit
 }
@@ -288,12 +288,10 @@ function TRAPCHLD() {
 trap "cleanup" INT KILL TERM
 
 parse_args $*
-if [[ $VERBOSE == 1 ]]; then
-    if [[ $LOG == 1 ]]; then
-        exec {logfd}>>$LOGFILE
-    else
-        exec {logfd}>&1
-    fi
+if [[ $LOG == 1 ]]; then
+    exec {logfd}>>$LOGFILE
+elif [[ $VERBOSE == 1 ]]; then
+    exec {logfd}>&1
 else
     exec {logfd}>/dev/null
 fi
