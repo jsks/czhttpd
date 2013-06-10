@@ -4,15 +4,19 @@
 zmodload zsh/net/tcp
 zmodload zsh/stat
 zmodload zsh/datetime
+zmodload zsh/zselect
 
 export TZ=UTC
-typeset -A header
-typeset -a pids
+
+integer logfd
+integer fifofd
 
 # Defaults
 DEF_PORT=8080   # Port
-DEF_CONNS=2     # Max Connections
+DEF_CONNS=4     # Max Connections
 DEF_TIME=90     # TCP Timeout
+
+FIFO=/tmp/czhttpd.fifo
 
 # Functions
 function error() {
@@ -21,15 +25,21 @@ function error() {
     exit 113
 }
 
+function logger() {
+    print "$*" >&$logfd
+}
+
 function help() {
 cat <<EOF
 Usage: czhttpd [OPTIONS] <optional file or dir>
 
 Options:
-    -p :    Port to bind to (default 8080).
-    -c :    Max number of connections to accept (default 2).
-    -t :    Connection timeout in seconds (default 60).
-    -h :    Print this help message.
+    -p :    Port to bind to (default 8080)
+    -c :    Max number of connections to accept (default 4)
+    -t :    Connection timeout in seconds (default 90)
+    -l :    Enable logging to existing file
+    -v :    Enable verbose output
+    -h :    Print this help message
 
 czhttpd can optionally serve a given file or directory, otherwise the current
 working directory will be recursively served.
@@ -38,18 +48,29 @@ EOF
 exit
 }
 
-function parse_conf() {
-    zparseopts -K -D -A OPTS p: c: t: h::
+function parse_args() {
+    zparseopts -K -D -A OPTS p: c: t: l: h v || exit
 
     [[ -n ${(kM)OPTS:#-h} ]] && help
 
-    for i in $OPTS; do
-        [[ $i != <-> ]] && error "$i is not a valid integer"
+    for i in ${(k)OPTS}; do
+        case $i in
+            (-c|-t)
+                [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i]i is not a valid integer";;
+            (-p)
+                [[ $OPTS[$i] != <-> || $OPTS[$i] < 1024 ]] && error "$OPTS[$i] is not a valid port number.";;
+            (-v)
+                VERBOSE=1;;
+            (-l)
+                LOG=1
+                [[ ! -f $OPTS[$i] ]] && error "File $OPTS[$i] does not exist.";;
+        esac
     done
 
     MAX_CONNECTIONS=${OPTS[-c]:-$DEF_CONNS}
     PORT=${OPTS[-p]:-$DEF_PORT}
     TIMEOUT=${OPTS[-t]:-$DEF_TIME}
+    LOGFILE=${OPTS[-l]:-null}
 
     if [[ -n $1 ]]; then
         [[ -e $1 ]] || error "$1 is not a valid directory or file."
@@ -60,21 +81,21 @@ function parse_conf() {
 }
 
 function http_listen() {
-    ztcp -lv $PORT 2>/dev/null || error "Could not bind to port $PORT"
+    ztcp -l $PORT 2>/dev/null || error "Could not bind to port $PORT"
+    print "Listening on $PORT" && logger "Port: $PORT"
     listenfd=$REPLY
 }
 
 
 function parse_header() {
     read -t $TIMEOUT -r -u $fd method url version || return 1
-    header[method]=$method
-    header[url]=$url
-    header[version]=$version
+    print method $method
+    print url $url
+    print version $version
 
-    read -r -u $fd key value
-    while [[ key != $'\r' ]] && [[ -n $value ]]; do
-        header[${key%$'\r'}]=${value%$'\r'}
-        read -r -u $fd key value
+    while read -r -u $fd line; do
+        [[ -n $line && $line != $'\r' ]] || break
+        print ${line%$'\r'}
     done
 
     return 0
@@ -218,7 +239,7 @@ function send_file() {
     cat $1 
 }
 
-function chunk() {
+function send_chunk() {
     printf '%x\r\n' "$(expr "x$1" : '.*' - 1)"
     printf '%s\r\n' "$1"
     printf '%x\r\n' "0"
@@ -227,7 +248,6 @@ function chunk() {
 
 function srv() {
     [[ $header[method] != "GET" ]] && { error_header 501; return 1 }
-    [[ $header[url] == "/favicon.ico" ]] && { return_header "200 Ok" text/html Content-Length 0; return }
 
     pathname="${DOCROOT}${$(urldecode $header[url])%/}"
     if [[ -d "$pathname" ]]; then
@@ -235,7 +255,7 @@ function srv() {
             send_file $pathname/index.html 
         else
             return_header "200 Ok" text/html Transfer-Encoding chunked
-            chunk "$(html_template $pathname $(list_dir $pathname))" 
+            send_chunk "$(html_template $pathname $(list_dir $pathname))"
         fi
     elif [[ -f "$pathname" ]]; then
         send_file $pathname
@@ -246,42 +266,77 @@ function srv() {
 }
 
 function cleanup() {
-    print "Exiting..."
+    print "\nGoodbye!"
 
-    if [[ -n $pids ]]; then
-        for i in $pids; do
-            [[ -f /proc/$i/exe ]] && kill $i
-        done
-    fi
+    for i in ${(SM)jobstates##<->}; do
+        kill $i 2>/dev/null
+    done
 
-    ztcp -c; exit
+    logger "> Exiting czhttpd"
+    exec {logfd}>&-; exec {fifofd}>&- {fifofd}<&-
+    rm $FIFO; ztcp -c; exit
+}
+
+function TRAPCHLD() {
+    while read -t 0 -u $fifofd line; do
+        logger "Exiting fork $line"
+    done
 }
 
 
 # Main
 trap "cleanup" INT KILL TERM
 
-parse_conf $*
+parse_args $*
+if [[ $VERBOSE == 1 ]]; then
+    if [[ $LOG == 1 ]]; then
+        exec {logfd}>>$LOGFILE
+    else
+        exec {logfd}>&1
+    fi
+else
+    exec {logfd}>/dev/null
+fi
+
+logger "> Initializing czhttpd"
+
 http_listen
 
-for ((j=0; j<$MAX_CONNECTIONS; j++)); do
-    ztcp -v -a $listenfd
+mkfifo $FIFO 2>/dev/null || error "Can not create $FIFO"
+exec {fifofd}<>$FIFO
 
-    ( trap "ztcp -c $fd; exit" KILL TERM
+
+while :; do
+    while (( ${#jobstates} >= $MAX_CONNECTIONS )); do
+        zselect -r $fifofd && break
+    done
+
+    ztcp -a $listenfd
+
+    logger "Incoming connection, forking..."
+    ( trap "ztcp -c; exit" KILL TERM
 
     fd=$REPLY
-    while true; do
-        parse_header
-        [[ $? == 1 || $header[Connection:] == closed ]] && break
+    while :; do
+        unset header && typeset -A header
+        while read -r key value; do
+            header[${key//:/}]="$value"
+        done < <(parse_header)
+
+        if [[ -z $header || header[Connection] == close ]]; then
+            logger "Closing connection"
+            RC=113; break
+        fi
+
+        logger "Serving $header[url]"
         srv >&$fd
     done
 
-    ztcp -c $fd ) &
+    ztcp -c
 
-    pids+=$!
+    # Mimic exit status since zsh does not have a posix compatible 'wait'
+    print "$sysparams[pid]: ${RC:-0}" ) >&$fifofd &
+
+    logger "Current forks: $jobstates"
+    ztcp -c $REPLY
 done
-
-wait
-
-print "Exiting..."
-ztcp -c; exit
