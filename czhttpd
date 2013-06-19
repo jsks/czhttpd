@@ -18,12 +18,14 @@ DEF_CONNS=4     # Max Connections
 DEF_TIME=90     # TCP Timeout
 
 FIFO=/tmp/czhttpd.fifo
+exec {logfd}>/dev/null
 
 # Functions
 function error() {
-    print "Error: $*" >&2
-    ztcp -c
-    exit 113
+    print "Error: $*" >&2 >&$logfd
+
+    exec {logfd}>&-
+    ztcp -c; exit 113
 }
 
 function logger() {
@@ -32,46 +34,52 @@ function logger() {
 
 function help() {
 cat <<EOF
-Usage: czhttpd [OPTIONS] <optional file or dir>
+Usage: czhttpd [OPTIONS] <file or dir>
 
-Options:
+czhttpd - cloud's zsh http server
+
+Options
     -p :    Port to bind to (default 8080)
     -c :    Max number of connections to accept (default 4)
     -t :    Connection timeout in seconds (default 90)
+
+Output Options
     -l :    Enable logging to existing file
-    -v :    Enable verbose output
+    -v :    Enable verbose output to stdout
     -h :    Print this help message
 
-czhttpd can optionally serve a given file or directory, otherwise the current
-working directory will be recursively served.
+If no file or directory is given, czhttpd defaults to serving
+the current directory.
 EOF
 
 exit
 }
 
 function parse_args() {
-    zparseopts -K -D -A OPTS p: c: t: l: h v || exit
+    zparseopts -K -D -A OPTS p: c: t: l: h v || exit 113
 
     [[ -n ${(kM)OPTS:#-h} ]] && help
+    [[ -n ${(k)OPTS[-l]} && -n ${(k)OPTS[-v]} ]] && error "Can not output to both stdout and logfile"
 
     for i in ${(k)OPTS}; do
         case $i in
             (-c|-t)
-                [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i]i is not a valid integer";;
+                [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i] is not a valid integer";;
             (-p)
                 [[ $OPTS[$i] != <-> || $OPTS[$i] < 1024 ]] && error "$OPTS[$i] is not a valid port number.";;
             (-v)
-                VERBOSE=1;;
+                exec {logfd}>&1 2>/dev/null;;
             (-l)
-                LOG=1
-                [[ ! -f $OPTS[$i] ]] && error "File $OPTS[$i] does not exist.";;
+                [[ ! -f $OPTS[$i] ]] && error "File $OPTS[$i] does not exist."
+                exec {logfd}>>$OPTS[$i];;
         esac
     done
+
+    logger "> Initializing czhttpd"
 
     MAX_CONNECTIONS=${OPTS[-c]:-$DEF_CONNS}
     PORT=${OPTS[-p]:-$DEF_PORT}
     TIMEOUT=${OPTS[-t]:-$DEF_TIME}
-    LOGFILE=${OPTS[-l]:-null}
 
     if [[ -n $1 ]]; then
         [[ -e $1 ]] || error "$1 is not a valid directory or file."
@@ -83,21 +91,26 @@ function parse_args() {
 
 function http_listen() {
     ztcp -l $PORT 2>/dev/null || error "Could not bind to port $PORT"
-    print "Listening on $PORT" && logger "Port: $PORT"
+    print "Listening on $PORT"
     listenfd=$REPLY
 }
 
 
-function parse_header() {
+function parse_request() {
     read -t $TIMEOUT -r -u $fd method url version || return 1
-    print method $method
-    print url $url
-    print version $version
+    print method ${method%$'\r'}
+    print url ${url%$'\r'}
+    print version ${version%$'\r'}
 
     while read -r -u $fd line; do
         [[ -n $line && $line != $'\r' ]] || break
         print ${line%$'\r'}
     done
+}
+
+function check_request() {
+    [[ $header[version] != "HTTP/1.1" ]] && { error_header 505 && return 1 }
+    [[ $header[method] != "HEAD" && $header[method] != "GET" ]] && { error_header 501 && return 1 }
 
     return 0
 }
@@ -120,6 +133,8 @@ function error_header() {
             message="404 Not Found";;
         (501)
             message="Not Implemented";;
+        (505)
+            message="HTTP Version Not Supported";;
     esac
 
     return_header "$message" text/plain Content-Length ${#message}
@@ -237,25 +252,28 @@ function send_file() {
     mimetype=$(mime_type $1)
 
     return_header "200 Ok" $mimetype Content-Length $array[size]
-    cat $1 
+    [[ $header[method] == "GET" ]] && cat $1
 }
 
 function send_chunk() {
-    printf '%x\r\n' "$(expr "x$1" : '.*' - 1)"
-    printf '%s\r\n' "$1"
-    printf '%x\r\n' "0"
-    printf '\r\n'
+    return_header "200 Ok" text/html Transfer-Encoding chunked
+
+    if [[ $header[method] == "GET" ]]; then
+        printf '%x\r\n' "$(expr "x$1" : '.*' - 1)"
+        printf '%s\r\n' "$1"
+        printf '%x\r\n' "0"
+        printf '\r\n'
+    fi
 }
 
 function srv() {
-    [[ $header[method] != "GET" ]] && { error_header 501; return 1 }
+    check_request || return
 
     pathname="${DOCROOT}${$(urldecode $header[url])%/}"
     if [[ -d "$pathname" ]]; then
         if [[ -f $pathname/index.html ]]; then
             send_file $pathname/index.html 
         else
-            return_header "200 Ok" text/html Transfer-Encoding chunked
             send_chunk "$(html_template $pathname $(list_dir $pathname))"
         fi
     elif [[ -f "$pathname" ]]; then
@@ -267,15 +285,13 @@ function srv() {
 }
 
 function cleanup() {
-    print "\nGoodbye!"
-
     for i in ${(SM)jobstates##<->}; do
         kill $i 2>/dev/null
     done
 
     logger "> Exiting main"
     exec {logfd}>&-; exec {fifofd}>&-
-    rm $FIFO; ztcp -c; exit
+    rm $FIFO; ztcp -c
 }
 
 function TRAPCHLD() {
@@ -284,26 +300,18 @@ function TRAPCHLD() {
     done
 }
 
-
 # Main
-trap "cleanup" INT KILL TERM
+trap "cleanup; exit" INT KILL TERM
 
 parse_args $*
-if [[ $LOG == 1 ]]; then
-    exec {logfd}>>$LOGFILE
-elif [[ $VERBOSE == 1 ]]; then
-    exec {logfd}>&1
-else
-    exec {logfd}>/dev/null
-fi
-
-logger "> Initializing czhttpd"
+logger "MAX_CONNECTIONS: $MAX_CONNECTIONS"
+logger "PORT: $PORT"
+logger "TIMEOUT: $TIMEOUT"
 
 http_listen
 
 mkfifo $FIFO 2>/dev/null || error "Can not create $FIFO"
 exec {fifofd}<>$FIFO
-
 
 while :; do
     while (( ${#jobstates} >= $MAX_CONNECTIONS )); do
@@ -320,15 +328,14 @@ while :; do
         unset header && typeset -A header
         while read -r key value; do
             header[${key//:/}]="$value"
-        done < <(parse_header)
+        done < <(parse_request)
 
-        if [[ -z $header || header[Connection] == close ]]; then
-            logger "Closing connection"
-            RC=113; break
-        fi
+        [[ -z $header ]] && { logger "Empty request, closing connection"; RC=113 && break }
 
         logger "Serving $header[url]"
         srv >&$fd
+
+        [[ $header[Connection] == "close" ]] && { logger "Connection type: close"; break }
     done
 
     ztcp -c
