@@ -145,7 +145,7 @@ function error_header() {
             message="505 HTTP Version Not Supported";;
     esac
 
-    logger "$message"
+    logger_child "$message"
     return_header "$message" text/plain Content-Length ${#message}
     print "$message"
 }
@@ -276,7 +276,7 @@ function send_chunk() {
 }
 
 function srv() {
-    check_request || return 1
+    check_request || { logger_child "Invalid request" && return }
 
     pathname="${DOCROOT}${$(urldecode $header[url])%/}"
     if [[ -d "$pathname" ]]; then
@@ -289,7 +289,6 @@ function srv() {
         send_file $pathname
     else
         error_header 404
-        return 1
     fi
 }
 
@@ -330,7 +329,7 @@ while :; do
     ztcp -a $listenfd
 
     logger "Incoming connection, forking"
-    ( trap "ztcp -c; exit" KILL TERM; trap ':' PIPE
+    ( trap "ztcp -c; exit" KILL TERM; trap '' PIPE
 
     fd=$REPLY
     while :; do
