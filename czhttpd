@@ -1,5 +1,5 @@
 #!/usr/bin/env zsh
-# zsh http server
+# zsh web server
 
 zmodload zsh/net/tcp
 zmodload zsh/stat
@@ -29,7 +29,11 @@ function error() {
 }
 
 function logger() {
-    print "$*" >&$logfd
+    print "[ $(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS) ] $*" >&$logfd
+}
+
+function logger_child() {
+    print "[ $(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS) ] Child $sysparams[pid]: $*" >&$logfd
 }
 
 function help() {
@@ -97,14 +101,18 @@ function http_listen() {
 
 
 function parse_request() {
-    read -t $TIMEOUT -r -u $fd method url version || return 1
-    print method ${method%$'\r'}
-    print url ${url%$'\r'}
-    print version ${version%$'\r'}
+    read -t $TIMEOUT -r -u $fd line || return 1
+    for method url version in ${(z)line%$'\r'}; do
+        header[method]="$method"
+        header[url]="$url"
+        header[version]="$version"
+    done
 
     while read -r -u $fd line; do
         [[ -n $line && $line != $'\r' ]] || break
-        print ${line%$'\r'}
+        for key value in ${(s/: /)line%$'\r'}; do
+            header[${key}]="$value"
+        done
     done
 }
 
@@ -132,11 +140,12 @@ function error_header() {
         (404)
             message="404 Not Found";;
         (501)
-            message="Not Implemented";;
+            message="501 Not Implemented";;
         (505)
-            message="HTTP Version Not Supported";;
+            message="505 HTTP Version Not Supported";;
     esac
 
+    logger "$message"
     return_header "$message" text/plain Content-Length ${#message}
     print "$message"
 }
@@ -267,7 +276,7 @@ function send_chunk() {
 }
 
 function srv() {
-    check_request || return
+    check_request || return 1
 
     pathname="${DOCROOT}${$(urldecode $header[url])%/}"
     if [[ -d "$pathname" ]]; then
@@ -320,22 +329,19 @@ while :; do
 
     ztcp -a $listenfd
 
-    logger "Incoming connection, forking..."
-    ( trap "ztcp -c; exit" KILL TERM
+    logger "Incoming connection, forking"
+    ( trap "ztcp -c; exit" KILL TERM; trap ':' PIPE
 
     fd=$REPLY
     while :; do
         unset header && typeset -A header
-        while read -r key value; do
-            header[${key//:/}]="$value"
-        done < <(parse_request)
+        parse_request
 
-        [[ -z $header ]] && { logger "Empty request, closing connection"; RC=113 && break }
+        [[ -z $header ]] && { logger_child "Empty request, closing"; RC=113 && break }
 
-        logger "Serving $header[url]"
-        srv >&$fd
+        srv >&$fd 2>/dev/null || { logger_child "Broken socket, closing"; RC=113 && break }
 
-        [[ $header[Connection] == "close" ]] && { logger "Connection type: close"; break }
+        [[ $header[Connection] == "close" ]] && { logger_child "Connection type: close, closing"; break }
     done
 
     ztcp -c
