@@ -7,8 +7,6 @@ zmodload zsh/datetime
 zmodload zsh/system
 zmodload zsh/zselect
 
-export TZ=UTC
-
 integer logfd
 integer fifofd
 
@@ -127,7 +125,7 @@ function return_header() {
     print -n "HTTP/1.1 $1\r\n"
     print -n "Connection: keep-alive\r\n"
     print -n "Content-Type: $2; charset=UTF-8\r\n"
-    print -n "Date: $(strftime "%a, %d %b %Y %H:%M:%S" $EPOCHSECONDS) GMT\r\n"
+    print -n "Date: $(export TZ=UTC && strftime "%a, %d %b %Y %H:%M:%S" $EPOCHSECONDS) GMT\r\n"
     print -n "Server: czhttpd\r\n"
     for i v in "$@[3,-1]"; do
         print -n "$i: $v\r\n"
