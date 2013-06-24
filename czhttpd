@@ -44,6 +44,7 @@ Options
     -p :    Port to bind to (default 8080)
     -c :    Max number of connections to accept (default 4)
     -t :    Connection timeout in seconds (default 90)
+    -a :    Display hidden files in directories
 
 Output Options
     -l :    Enable logging to existing file
@@ -58,13 +59,15 @@ exit
 }
 
 function parse_args() {
-    zparseopts -K -D -A OPTS p: c: t: l: h v || exit 113
+    zparseopts -K -D -A OPTS p: c: t: l: h v a || exit 113
 
     [[ -n ${(kM)OPTS:#-h} ]] && help
     [[ -n ${(k)OPTS[-l]} && -n ${(k)OPTS[-v]} ]] && error "Can not output to both stdout and logfile"
 
     for i in ${(k)OPTS}; do
         case $i in
+            (-a)
+                setopt GLOB_DOTS;;
             (-c|-t)
                 [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i] is not a valid integer";;
             (-p)
@@ -135,6 +138,8 @@ function return_header() {
 
 function error_header() {
     case "$1" in
+        (403)
+            message="403 Forbidden";;
         (404)
             message="404 Not Found";;
         (501)
@@ -143,7 +148,7 @@ function error_header() {
             message="505 HTTP Version Not Supported";;
     esac
 
-    logger_child "$message"
+    logger_child "$message; Request: $header[method] $header[url] $header[version]"
     return_header "$message" text/plain Content-Length ${#message}
     print "$message"
 }
@@ -274,10 +279,12 @@ function send_chunk() {
 }
 
 function srv() {
-    check_request || { logger_child "Invalid request" && return }
+    check_request || return
 
     pathname="${DOCROOT}${$(urldecode $header[url])%/}"
     if [[ -d "$pathname" ]]; then
+        [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403 && return }
+
         if [[ -f $pathname/index.html ]]; then
             send_file $pathname/index.html 
         else
