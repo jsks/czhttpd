@@ -23,6 +23,7 @@ function error() {
     print "Error: $*" >&2 >&$logfd
 
     exec {logfd}>&-
+    rm $FIFO 2>/dev/null
     ztcp -c; exit 113
 }
 
@@ -208,22 +209,20 @@ function urldecode() {
 }
 
 function mime_type() {
-    if [[ -f $1 ]]; then
-        case $1 in
-            (*.html)
-                print "text/html";;
-            (*)
-                type=$(file --mime-type -bL $1)
-                [[ ${type:h} == text ]] && { print "text/plain" && continue }
-                print "${type#application/x-executable}";;
-        esac
-    elif [[ -d $1 ]]; then
-        print "Directory"
-    fi
+    [[ -d "$1" ]] && { print "Directory"; return }
+
+    case $1 in
+        (*.html)
+            print "text/html";;
+        (*)
+            type=$(file --mime-type -bL $1)
+            [[ ${type:h} == text ]] && { print "text/plain" && continue }
+            print "${type#application/x-executable}";;
+    esac
 }
 
 function calc_size() {
-    [[ -d "$1" ]] && { print "\-" && return }
+    [[ -d "$1" ]] && { print "\-"; return }
 
     KB=1024.0
     MB=1048576.0
@@ -238,17 +237,22 @@ function calc_size() {
 }
  
 function list_dir() {
-    local -a dir files
+    local -a dir dotdir files dotfiles
     cd "$1"
 
-    [[ "${1%/}" != "${DOCROOT%/}" ]] && dir+="/../"
+    [[ "${1%/}" != "${DOCROOT%/}" ]] && dotdir+="/../"
 
     for i in ./*(Nr); do
+        if [[ $i == ./.* ]]; then
+            [[ -d "$i" ]] && dotdir+="${i}/"
+            [[ -f "$i" ]] && dotfiles+="$i"
+            continue
+        fi
         [[ -d "$i" ]] && { dir+="${i}/" && continue }
         files+="$i"
     done
 
-    for i in $dir $files; do
+    for i in $dotdir $dir $dotfiles $files; do
         print "<tr><td><a href=\"${i#*/}\">${i#*/}</a></td>"
         print "<td>$(calc_size $i)</td>"
         print "<td>$(mime_type $i)</td></tr>"
