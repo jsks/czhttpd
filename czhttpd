@@ -138,7 +138,8 @@ function parse_request() {
     read -t $TIMEOUT -r -u $fd line || return 1
     for method url version in ${(z)line%$'\r'}; do
         header[method]="$method"
-        header[url]="$url"
+        header[url]="${url%\?*}"
+        header[querystr]="${${(M)url%\?*}#\?}" #ugly
         header[version]="$version"
     done
 
@@ -151,8 +152,8 @@ function parse_request() {
 }
 
 function check_request() {
-    [[ $header[version] != "HTTP/1.1" ]] && { error_header 505 && return 1 }
-    [[ $header[method] != "HEAD" && $header[method] != "GET" ]] && { error_header 501 && return 1 }
+    [[ $header[version] != "HTTP/1.1" ]] && { error_header 505; return 1 }
+    [[ $header[method] != "HEAD" && $header[method] != "GET" ]] && { error_header 501; return 1 }
 
     return 0
 }
@@ -247,7 +248,7 @@ function mime_type() {
             print "text/html";;
         (*)
             type=$(file --mime-type -bL $1)
-            [[ ${type:h} == text ]] && { print "text/plain" && continue }
+            [[ ${type:h} == text ]] && { print "text/plain"; continue }
             print "${type#application/x-executable}";;
     esac
 }
@@ -334,6 +335,7 @@ function exec_cgi() {
     coproc $COMMAND $1
 
     zselect -r 0 <&p
+
     while read -p line; do
         [[ -z $line ]] && break
         [[ $line == $'\r' ]] && break
@@ -345,7 +347,7 @@ function exec_cgi() {
     done
 
     [[ -z ${(M)${head:l}:#content-type*} ]] && head+="Content-Type: text/html"
-    [[ -z ${(M)${head:l}:#content-length*} ]] && { head+="Content-Length: $(strlen $body)" }
+    [[ -z ${(M)${head:l}:#content-length*} ]] && head+="Content-Length: $(strlen $body)"
 
     return_header "200 Ok" ${head[@]}
     [[ $header[method] == "GET" ]] && print "$body"
@@ -356,10 +358,10 @@ function srv() {
 
     pathname="${DOCROOT}${$(urldecode $header[url])%/}"
     if [[ -d "$pathname" ]]; then
-        [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403 && return }
+        [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403; return }
         for i in $INDEX_FILES; do
             if [[ -f $pathname/$i ]]; then
-                [[ $i == *.php ]] && { exec_cgi $pathname/$i && return }
+                [[ $i == *.php ]] && { exec_cgi $pathname/$i; return }
                 send_file $pathname/$i && return
             fi
         done
@@ -368,7 +370,7 @@ function srv() {
 
     elif [[ -f "$pathname" ]]; then
         logger "Pathname is $pathname"
-        [[ $pathname == *.pl ]] && { exec_cgi $pathname && return }
+        [[ $pathname == *.pl ]] && { exec_cgi $pathname; return }
         send_file $pathname
     else
         error_header 404
