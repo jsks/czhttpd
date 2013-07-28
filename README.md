@@ -4,3 +4,6 @@ This is *not* intended for serious use. It has terrible security and was never d
 
 Requirements:
 - `file`
+
+TODO:
+- CGI

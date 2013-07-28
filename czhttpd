@@ -1,12 +1,26 @@
 #!/usr/bin/env zsh
 # zsh web server
 
+# Clear env
+for i in ${$(export)%=*}; do
+    case $i in
+        (PWD|_)
+            continue;;
+        (*)
+            unset $i;;
+    esac
+done
+
+export PATH=/bin:/usr/bin
+
+# Load Modules
 zmodload zsh/net/tcp
 zmodload zsh/stat
 zmodload zsh/datetime
 zmodload zsh/system
 zmodload zsh/zselect
 
+# Declare variable types
 integer logfd
 integer fifofd
 
@@ -15,8 +29,15 @@ DEF_PORT=8080   # Port
 DEF_CONNS=4     # Max Connections
 DEF_TIME=90     # TCP Timeout
 
+INDEX_FILES=("index.html" "index.php")
+
 FIFO=/tmp/czhttpd.fifo
 exec {logfd}>/dev/null
+
+# CGI Variables
+SERVER_NAME="127.0.0.1"
+SERVER_SOFTWARE="czhttpd/1.0"
+GATEWAY_INTERFACE="CGI/1.1"
 
 # Functions
 function error() {
@@ -33,6 +54,17 @@ function logger() {
 
 function logger_child() {
     print "[ $(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS) ] Child $sysparams[pid]: $*" >&$logfd
+}
+
+# We need a function to calculate length of strings containing '\n'
+function strlen() {
+    integer k=0
+
+    while read line; do
+        k+=${#line}
+    done <<< $1
+
+    print $k
 }
 
 function help() {
@@ -128,11 +160,10 @@ function check_request() {
 function return_header() {
     print -n "HTTP/1.1 $1\r\n"
     print -n "Connection: keep-alive\r\n"
-    print -n "Content-Type: $2; charset=UTF-8\r\n"
     print -n "Date: $(export TZ=UTC && strftime "%a, %d %b %Y %H:%M:%S" $EPOCHSECONDS) GMT\r\n"
     print -n "Server: czhttpd\r\n"
-    for i v in "$@[3,-1]"; do
-        print -n "$i: $v\r\n"
+    for i in "$@[2,-1]"; do
+        print -n "$i\r\n"
     done
     print -n "\r\n"
 }
@@ -150,10 +181,10 @@ function error_header() {
     esac
 
     logger_child "$message; Request: $header[method] $header[url] $header[version]"
-    return_header "$message" text/plain Content-Length ${#message}
+    return_header "$message" "Content-type: text/plain; charset=UTF-8" "Content-Length: ${#message}"
     print "$message"
 }
-            
+
 function html_template() {
 cat <<EOF
 <!DOCTYPE html>
@@ -267,12 +298,12 @@ function send_file() {
     stat -H array $1
     mimetype=$(mime_type $1)
 
-    return_header "200 Ok" $mimetype Content-Length $array[size]
+    return_header "200 Ok" "Content-type: $mimetype; charset=UTF-8" "Content-Length: $array[size]"
     [[ $header[method] == "GET" ]] && cat $1
 }
 
 function send_chunk() {
-    return_header "200 Ok" text/html Transfer-Encoding chunked
+    return_header "200 Ok" "Content-type: text/html; charset=UTF-8" "Transfer-Encoding: chunked"
 
     if [[ $header[method] == "GET" ]]; then
         printf '%x\r\n' "$(expr "x$1" : '.*' - 1)"
@@ -282,19 +313,62 @@ function send_chunk() {
     fi
 }
 
+function exec_cgi() {
+    export DOCUMENT_ROOT="$DOCROOT" SERVER_SOFTWARE SERVER_NAME GATEWAY_INTERFACE SERVER_PROTOCOL SERVER_PORT="$PORT" REQUEST_URI="$header[url]" REQUEST_METHOD="$header[method]" QUERY_STRING="$header[querystr]" SCRIPT_NAME="$1" SCRIPT_FILENAME=$(print $1(A:)) REDIRECT_STATUS=1
+
+    local -a head
+    local body
+
+    case $1 in
+        (*.pl)
+            COMMAND="perl";;
+        (*.py)
+            COMMAND="python";;
+        (*.php)
+            COMMAND="php-cgi";;
+        (*)
+            return;;
+    esac
+
+    logger "Executing cgi script $1"
+    coproc $COMMAND $1
+
+    zselect -r 0 <&p
+    while read -p line; do
+        [[ -z $line ]] && break
+        [[ $line == $'\r' ]] && break
+        head+="${line%$'\r'}"
+    done
+
+    while read -p line; do
+        body+="$line\n"
+    done
+
+    [[ -z ${(M)${head:l}:#content-type*} ]] && head+="Content-Type: text/html"
+    [[ -z ${(M)${head:l}:#content-length*} ]] && { head+="Content-Length: $(strlen $body)" }
+
+    return_header "200 Ok" ${head[@]}
+    [[ $header[method] == "GET" ]] && print "$body"
+}
+
 function srv() {
     check_request || return
 
     pathname="${DOCROOT}${$(urldecode $header[url])%/}"
     if [[ -d "$pathname" ]]; then
         [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403 && return }
+        for i in $INDEX_FILES; do
+            if [[ -f $pathname/$i ]]; then
+                [[ $i == *.php ]] && { exec_cgi $pathname/$i && return }
+                send_file $pathname/$i && return
+            fi
+        done
 
-        if [[ -f $pathname/index.html ]]; then
-            send_file $pathname/index.html 
-        else
-            send_chunk "$(html_template $pathname $(list_dir $pathname))"
-        fi
+        send_chunk "$(html_template $pathname $(list_dir $pathname))"
+
     elif [[ -f "$pathname" ]]; then
+        logger "Pathname is $pathname"
+        [[ $pathname == *.pl ]] && { exec_cgi $pathname && return }
         send_file $pathname
     else
         error_header 404
