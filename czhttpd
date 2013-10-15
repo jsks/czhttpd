@@ -29,12 +29,14 @@ DEF_PORT=8080   # Port
 DEF_CONNS=4     # Max Connections
 DEF_TIME=90     # TCP Timeout
 
-INDEX_FILES=("index.html" "index.php")
+INDEX_FILE="index.html"
 
 FIFO=/tmp/czhttpd.fifo
 exec {logfd}>/dev/null
 
 # CGI Variables
+ENABLE_CGI=0
+
 SERVER_NAME="127.0.0.1"
 SERVER_SOFTWARE="czhttpd/1.0"
 GATEWAY_INTERFACE="CGI/1.1"
@@ -56,17 +58,6 @@ function logger_child() {
     print "[ $(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS) ] Child $sysparams[pid]: $*" >&$logfd
 }
 
-# We need a function to calculate length of strings containing '\n'
-function strlen() {
-    integer k=0
-
-    while read line; do
-        k+=${#line}
-    done <<< $1
-
-    print $k
-}
-
 function help() {
 cat <<EOF
 Usage: czhttpd [OPTIONS] <file or dir>
@@ -74,10 +65,13 @@ Usage: czhttpd [OPTIONS] <file or dir>
 czhttpd - cloud's zsh http server
 
 Options
-    -p :    Port to bind to (default 8080)
-    -c :    Max number of connections to accept (default 4)
-    -t :    Connection timeout in seconds (default 90)
+    -c :    Max number of connections to accept (default: 4)
+    -p :    Port to bind to (default: 8080)
+    -t :    Connection timeout in seconds (default: 90)
+
     -a :    Display hidden files in directories
+    -i :    Specify index file (default: index.html)
+    -x :    Enable CGI (handles python, perl, php)
 
 Output Options
     -l :    Enable logging to existing file
@@ -92,7 +86,7 @@ exit
 }
 
 function parse_args() {
-    zparseopts -K -D -A OPTS p: c: t: l: h v a || exit 113
+    zparseopts -K -D -A OPTS p: c: i: t: l: h v a x || exit 113
 
     [[ -n ${(kM)OPTS:#-h} ]] && help
     [[ -n ${(k)OPTS[-l]} && -n ${(k)OPTS[-v]} ]] && error "Can not output to both stdout and logfile"
@@ -103,6 +97,8 @@ function parse_args() {
                 setopt GLOB_DOTS;;
             (-c|-t)
                 [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i] is not a valid integer";;
+            (-i)
+                INDEX_FILE="$OPTS[$i]";;
             (-p)
                 [[ $OPTS[$i] != <-> || $OPTS[$i] < 1024 ]] && error "$OPTS[$i] is not a valid port number.";;
             (-v)
@@ -110,6 +106,8 @@ function parse_args() {
             (-l)
                 [[ ! -f $OPTS[$i] ]] && error "File $OPTS[$i] does not exist."
                 exec {logfd}>>$OPTS[$i];;
+            (-x)
+                ENABLE_CGI=1;;
         esac
     done
 
@@ -136,7 +134,7 @@ function http_listen() {
 
 function parse_request() {
     read -t $TIMEOUT -r -u $fd line || return 1
-    for method url version in ${(z)line%$'\r'}; do
+    for method url version in ${(s. .)line%$'\r'}; do
         header[method]="$method"
         header[url]="${url%\?*}"
         header[querystr]="${${(M)url%\?*}#\?}" #ugly
@@ -304,11 +302,11 @@ function send_file() {
 }
 
 function send_chunk() {
-    return_header "200 Ok" "Content-type: text/html; charset=UTF-8" "Transfer-Encoding: chunked"
-
     if [[ $header[method] == "GET" ]]; then
-        printf '%x\r\n' "$(expr "x$1" : '.*' - 1)"
-        printf '%s\r\n' "$1"
+        for i in {1..$#}; do
+            printf '%x\r\n' "$(expr "x$@[$i]" : '.*' - 1)"
+            printf '%s\r\n' "$@[$i]"
+        done
         printf '%x\r\n' "0"
         printf '\r\n'
     fi
@@ -317,8 +315,7 @@ function send_chunk() {
 function exec_cgi() {
     export DOCUMENT_ROOT="$DOCROOT" SERVER_SOFTWARE SERVER_NAME GATEWAY_INTERFACE SERVER_PROTOCOL SERVER_PORT="$PORT" REQUEST_URI="$header[url]" REQUEST_METHOD="$header[method]" QUERY_STRING="$header[querystr]" SCRIPT_NAME="$1" SCRIPT_FILENAME=$(print $1(A:)) REDIRECT_STATUS=1
 
-    local -a head
-    local body
+    local -a head body
 
     case $1 in
         (*.pl)
@@ -327,51 +324,49 @@ function exec_cgi() {
             COMMAND="python";;
         (*.php)
             COMMAND="php-cgi";;
-        (*)
-            return;;
     esac
 
-    logger "Executing cgi script $1"
-    coproc $COMMAND $1
+    logger "Executing cgi script: $1"
+    coproc { $COMMAND $1 }
+    exec 3<&p
 
-    zselect -r 0 <&p
-
-    while read -p line; do
-        [[ -z $line ]] && break
-        [[ $line == $'\r' ]] && break
-        head+="${line%$'\r'}"
+    while read -r -u 3 line; do
+        [[ -z $line || $line == $'\r' ]] && break
+        head+=${line%$'\r'}
     done
+    [[ -z ${(M)${head:l}:#content-type*} ]] && head+="Content-Type: text/html; charset=UTF-8"
+    return_header "200 Ok" "Transfer-Encoding: chunked" $head[@]
 
-    while read -p line; do
-        body+="$line\n"
+    # We use sysread to limit the number of bytes read so as not to exceed MAX_ARG for expr
+    while sysread -i 3 chunk; do
+        body+=$chunk
     done
-
-    [[ -z ${(M)${head:l}:#content-type*} ]] && head+="Content-Type: text/html"
-    [[ -z ${(M)${head:l}:#content-length*} ]] && head+="Content-Length: $(strlen $body)"
-
-    return_header "200 Ok" ${head[@]}
-    [[ $header[method] == "GET" ]] && print "$body"
+    send_chunk $body[@]
 }
 
 function srv() {
     check_request || return
 
     pathname="${DOCROOT}${$(urldecode $header[url])%/}"
-    if [[ -d "$pathname" ]]; then
+    if [[ -f $pathname ]]; then
         [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403; return }
-        for i in $INDEX_FILES; do
-            if [[ -f $pathname/$i ]]; then
-                [[ $i == *.php ]] && { exec_cgi $pathname/$i; return }
-                send_file $pathname/$i && return
+        if [[ $ENABLE_CGI == 1 && ${pathname:t} =~ .pl\|.py\|.php\$ ]]; then
+            exec_cgi $pathname
+        else
+            send_file $pathname
+        fi
+
+    elif [[ -d $pathname ]]; then
+        if [[ -f $pathname/$INDEX_FILE ]]; then
+            if [[ $ENABLE_CGI == 1 && ${INDEX_FILE:t} =~ .pl\|.py\|.php\$ ]]; then
+                exec_cgi $pathname/$INDEX_FILE
+            else
+                send_file $pathname/$INDEX_FILE
             fi
-        done
-
-        send_chunk "$(html_template $pathname $(list_dir $pathname))"
-
-    elif [[ -f "$pathname" ]]; then
-        logger "Pathname is $pathname"
-        [[ $pathname == *.pl ]] && { exec_cgi $pathname; return }
-        send_file $pathname
+        else
+            return_header "200 Ok" "Transfer-Encoding: chunked" "Content-type: text/html; charset=UTF-8"
+            send_chunk "$(html_template $pathname $(list_dir $pathname))"
+        fi
     else
         error_header 404
     fi
@@ -400,6 +395,9 @@ parse_args $*
 logger "MAX_CONNECTIONS: $MAX_CONNECTIONS"
 logger "PORT: $PORT"
 logger "TIMEOUT: $TIMEOUT"
+logger "INDEX_FILE: $INDEX_FILE"
+logger "ENABLE_CGI: $ENABLE_CGI"
+logger "HIDDEN_FILES: $options[globdots]"
 
 http_listen
 
