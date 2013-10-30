@@ -7,5 +7,4 @@ Requirements:
 - `coreutils`
 
 TODO:
-- Finish testing CGI
-- Better directory handling
+- Handle POST request

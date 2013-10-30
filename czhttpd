@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/usr/bin/zsh
 # zsh web server
 
 # Clear env
@@ -20,22 +20,25 @@ zmodload zsh/datetime
 zmodload zsh/system
 zmodload zsh/zselect
 
+# Set shell options
+setopt posix_jobs
+
 # Declare variable types
 integer logfd
 integer fifofd
+typeset -a CGI_EXTS
 
 # Defaults
-DEF_PORT=8080   # Port
-DEF_CONNS=4     # Max Connections
-DEF_TIME=90     # TCP Timeout
-
-INDEX_FILE="index.html"
+DEF_PORT=8080           # Port
+DEF_CONNS=12            # Max Connections
+DEF_TIME=15             # HTTP Timeout
+DEF_INDEX="index.html"  # Index File
 
 FIFO=/tmp/czhttpd.fifo
 exec {logfd}>/dev/null
 
 # CGI Variables
-ENABLE_CGI=0
+CGI_TIMEOUT=300
 
 SERVER_NAME="127.0.0.1"
 SERVER_SOFTWARE="czhttpd/1.0"
@@ -58,20 +61,33 @@ function logger_child() {
     print "[ $(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS) ] Child $sysparams[pid]: $*" >&$logfd
 }
 
+function timeout() {
+    function TRAPCHLD() {
+        kill $pid1 $pid2 2>/dev/null
+    }
+
+    $* &; pid1=$!
+    sleep $CGI_TIMEOUT &; pid2=$!
+
+    wait $pid1
+}
+
 function help() {
 cat <<EOF
 Usage: czhttpd [OPTIONS] <file or dir>
 
 czhttpd - cloud's zsh http server
 
-Options
-    -c :    Max number of connections to accept (default: 4)
+Connection Options
+    -c :    Max number of connections to accept (default: 12)
     -p :    Port to bind to (default: 8080)
-    -t :    Connection timeout in seconds (default: 90)
+    -t :    Connection timeout in seconds (default: 15)
 
+File Options
     -a :    Display hidden files in directories
     -i :    Specify index file (default: index.html)
-    -x :    Enable CGI (handles python, perl, php)
+    -x :    Execute files with the given comma delimited list of
+            file extensions as CGI scripts
 
 Output Options
     -l :    Enable logging to existing file
@@ -86,7 +102,7 @@ exit
 }
 
 function parse_args() {
-    zparseopts -K -D -A OPTS p: c: i: t: l: h v a x || exit 113
+    zparseopts -K -D -A OPTS p: c: i: t: l: x: h v a || exit 113
 
     [[ -n ${(kM)OPTS:#-h} ]] && help
     [[ -n ${(k)OPTS[-l]} && -n ${(k)OPTS[-v]} ]] && error "Can not output to both stdout and logfile"
@@ -97,8 +113,6 @@ function parse_args() {
                 setopt GLOB_DOTS;;
             (-c|-t)
                 [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i] is not a valid integer";;
-            (-i)
-                INDEX_FILE="$OPTS[$i]";;
             (-p)
                 [[ $OPTS[$i] != <-> || $OPTS[$i] < 1024 ]] && error "$OPTS[$i] is not a valid port number.";;
             (-v)
@@ -107,7 +121,7 @@ function parse_args() {
                 [[ ! -f $OPTS[$i] ]] && error "File $OPTS[$i] does not exist."
                 exec {logfd}>>$OPTS[$i];;
             (-x)
-                ENABLE_CGI=1;;
+                for k in ${(s.,.)OPTS[$i]}; CGI_EXTS+="${k##*.}";;
         esac
     done
 
@@ -116,6 +130,7 @@ function parse_args() {
     MAX_CONNECTIONS=${OPTS[-c]:-$DEF_CONNS}
     PORT=${OPTS[-p]:-$DEF_PORT}
     TIMEOUT=${OPTS[-t]:-$DEF_TIME}
+    INDEX_FILE=${OPTS[-i]:-$DEF_INDEX}
 
     if [[ -n $1 ]]; then
         [[ -e $1 ]] || error "$1 is not a valid directory or file."
@@ -173,6 +188,8 @@ function error_header() {
             message="403 Forbidden";;
         (404)
             message="404 Not Found";;
+        (500)
+            message="500 Internal Server Error";;
         (501)
             message="501 Not Implemented";;
         (505)
@@ -244,10 +261,12 @@ function mime_type() {
     case $1 in
         (*.html)
             print "text/html";;
+        (*.css)
+            print "text/css";;
         (*)
-            type=$(file --mime-type -bL $1)
-            [[ ${type:h} == text ]] && { print "text/plain"; continue }
-            print "${type#application/x-executable}";;
+            mtype=$(file --mime-type -bL $1)
+            [[ ${mtype:h} == text ]] && { print "text/plain"; continue }
+            print "${mtype#application/x-executable}";;
     esac
 }
 
@@ -265,30 +284,36 @@ function calc_size() {
     (( $size < $GB )) && { printf '%.1f%s\n' "$((size/$MB))" "M" && return }
     (( $size > $GB )) && { printf '%.1f%s\n' "$((size/$GB))" "G" && return }
 }
+
+function html_fragment() {
+cat <<EOF
+<tr><td><a href=\"${1#*/}\">${1#*/}</a></td>
+<td>$(calc_size $1)</td>
+<td>$(mime_type $1)</td></tr>
+EOF
+}
+
  
 function list_dir() {
     local -a dir dotdir files dotfiles
     cd "$1"
 
-    [[ "${1%/}" != "${DOCROOT%/}" ]] && dotdir+="/../"
+    [[ "${1%/}" != "${DOCROOT%/}" ]] && dotdir+="$(html_fragment '/../')"
 
     for i in ./*(Nr); do
         if [[ $i == ./.* ]]; then
-            [[ -d "$i" ]] && dotdir+="${i}/"
-            [[ -f "$i" ]] && dotfiles+="$i"
+            [[ -d "$i" ]] && dotdir+="$(html_fragment $i/)"
+            [[ -f "$i" ]] && dotfiles+="$(html_fragment $i)"
             continue
+        elif [[ -d "$i" ]]; then
+            dir+="$(html_fragment $i/)"
+        else
+            files+="$(html_fragment $i)"
         fi
-        [[ -d "$i" ]] && { dir+="${i}/" && continue }
-        files+="$i"
     done
 
-    for i in $dotdir $dir $dotfiles $files; do
-        print "<tr><td><a href=\"${i#*/}\">${i#*/}</a></td>"
-        print "<td>$(calc_size $i)</td>"
-        print "<td>$(mime_type $i)</td></tr>"
-    done
-
-    cd - 
+    print $dotdir $dotfiles $dir $files
+    cd -
 }
 
 function send_file() {
@@ -312,45 +337,53 @@ function send_chunk() {
     fi
 }
 
+function check_if_cgi() {
+    for i in $CGI_EXTS; [[ ${1##*.} == $i ]] && break
+
+    [[ $? != 0 || ! -x $i ]] && return 1
+}
+
 function exec_cgi() {
     export DOCUMENT_ROOT="$DOCROOT" SERVER_SOFTWARE SERVER_NAME GATEWAY_INTERFACE SERVER_PROTOCOL SERVER_PORT="$PORT" REQUEST_URI="$header[url]" REQUEST_METHOD="$header[method]" QUERY_STRING="$header[querystr]" SCRIPT_NAME="$1" SCRIPT_FILENAME=$(print $1(A:)) REDIRECT_STATUS=1
-
     local -a head body
+    local cmd
 
-    case $1 in
-        (*.pl)
-            COMMAND="perl";;
-        (*.py)
-            COMMAND="python";;
-        (*.php)
-            COMMAND="php-cgi";;
-    esac
+    [[ $1 == *.php ]] && cmd="php-cgi"
 
-    logger "Executing cgi script: $1"
-    coproc { $COMMAND $1 }
-    exec 3<&p
+    logger_child "Executing cgi script: $1"
+    coproc { timeout $cmd $1 }
+    pid=$!
 
-    while read -r -u 3 line; do
+    while read -r -p line; do
         [[ -z $line || $line == $'\r' ]] && break
         head+=${line%$'\r'}
     done
-    [[ -z ${(M)${head:l}:#content-type*} ]] && head+="Content-Type: text/html; charset=UTF-8"
-    return_header "200 Ok" "Transfer-Encoding: chunked" $head[@]
 
     # We use sysread to limit the number of bytes read so as not to exceed MAX_ARG for expr
-    while sysread -i 3 chunk; do
+    while sysread chunk <&p; do
         body+=$chunk
     done
-    send_chunk $body[@]
+
+    if ! wait $pid; then
+        logger_child "ERROR executing CGI script $1"
+        return 1
+    elif [[ -z ${(M)${head:l}:#content-type*} ]]; then
+        logger_child "ERROR CGI script $1 failed to return MIME-type"
+        return 1
+    else
+        return_header "200 Ok" "Transfer-Encoding: chunked" $head[@]
+        send_chunk $body[@]
+    fi
 }
 
 function srv() {
-    check_request || return
+    check_request || return 1
 
     pathname="${DOCROOT}${$(urldecode $header[url])%/}"
-    if [[ -f $pathname ]]; then
+    { if [[ -f $pathname ]]; then
         [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403; return }
-        if [[ $ENABLE_CGI == 1 && ${pathname:t} =~ .pl\|.py\|.php\$ ]]; then
+
+        if check_if_cgi $pathname; then
             exec_cgi $pathname
         else
             send_file $pathname
@@ -358,7 +391,7 @@ function srv() {
 
     elif [[ -d $pathname ]]; then
         if [[ -f $pathname/$INDEX_FILE ]]; then
-            if [[ $ENABLE_CGI == 1 && ${INDEX_FILE:t} =~ .pl\|.py\|.php\$ ]]; then
+            if check_if_cgi $INDEX_FILE; then
                 exec_cgi $pathname/$INDEX_FILE
             else
                 send_file $pathname/$INDEX_FILE
@@ -369,7 +402,7 @@ function srv() {
         fi
     else
         error_header 404
-    fi
+    fi } || error_header 500
 }
 
 function cleanup() {
@@ -396,7 +429,7 @@ logger "MAX_CONNECTIONS: $MAX_CONNECTIONS"
 logger "PORT: $PORT"
 logger "TIMEOUT: $TIMEOUT"
 logger "INDEX_FILE: $INDEX_FILE"
-logger "ENABLE_CGI: $ENABLE_CGI"
+logger "CGI_EXTENSIONS: ${CGI_EXTS:-"N/A"}"
 logger "HIDDEN_FILES: $options[globdots]"
 
 http_listen
