@@ -348,7 +348,7 @@ function send_chunk() {
 function check_if_cgi() {
     for i in $CGI_EXTS; [[ ${1##*.} == $i ]] && break
 
-    [[ $? != 0 ]] && return 1
+    [[ $? != 0 || ! -x $1 ]] && return 1
 
     return 0
 }
@@ -384,7 +384,7 @@ function exec_cgi() {
 
     local -x CONTENT_LENGTH="$header[content-length]" CONTENT_TYPE="$header[content-type]" GATEWAY_INTERFACE="$GATEWAY_INTERFACE" QUERY_STRING="${header[querystr]#\?}" REQUEST_METHOD="$header[method]" SCRIPT_NAME="${1#$DOCROOT}" SERVER_NAME="$SERVER_NAME" SERVER_ADDR="$SERVER_ADDR" SERVER_PORT="$PORT" SERVER_PROTOCOL="$SERVER_PROTOCOL" SERVER_SOFTWARE="$SERVER_SOFTWARE"
 
-    local -x DOCUMENT_ROOT="$DOCROOT" REQUEST_URI="$header[url]$header[querystr]" SCRIPT_FILENAME=$(print $1(A:)) REDIRECT_STATUS=1
+    local -x DOCUMENT_ROOT="$DOCROOT" REQUEST_URI="$header[url]$header[querystr]" SCRIPT_FILENAME=$1 REDIRECT_STATUS=1
 
     for i in ${(k)header}; do
         case $i in
