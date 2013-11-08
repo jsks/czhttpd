@@ -42,7 +42,7 @@ CGI_TIMEOUT=300
 
 SERVER_NAME="${$(hostname -i)% }"
 SERVER_ADDR="$SERVER_NAME"
-SERVER_SOFTWARE="czhttpd/1.0"
+SERVER_SOFTWARE="czhttpd/1.1b"
 SERVER_PROTOCOL="HTTP/1.1"
 GATEWAY_INTERFACE="CGI/1.1"
 
@@ -85,7 +85,7 @@ czhttpd - cloud's zsh http server
 Connection Options
     -c :    Max number of connections to accept (default: 12)
     -p :    Port to bind to (default: 8080)
-    -t :    Connection timeout in seconds (default: 15)
+    -t :    Connection timeout in seconds (default: 5)
 
 File Options
     -a :    Display hidden files in directories
@@ -384,7 +384,7 @@ function exec_cgi() {
 
     local -x CONTENT_LENGTH="$header[content-length]" CONTENT_TYPE="$header[content-type]" GATEWAY_INTERFACE="$GATEWAY_INTERFACE" QUERY_STRING="${header[querystr]#\?}" REQUEST_METHOD="$header[method]" SCRIPT_NAME="${1#$DOCROOT}" SERVER_NAME="$SERVER_NAME" SERVER_ADDR="$SERVER_ADDR" SERVER_PORT="$PORT" SERVER_PROTOCOL="$SERVER_PROTOCOL" SERVER_SOFTWARE="$SERVER_SOFTWARE"
 
-    local -x DOCUMENT_ROOT="$DOCROOT" REQUEST_URI="$header[url]$header[querystr]" SCRIPT_FILENAME=$1 REDIRECT_STATUS=1
+    local -x DOCUMENT_ROOT="$DOCROOT" REQUEST_URI="$header[url]$header[querystr]" SCRIPT_FILENAME="$1" REDIRECT_STATUS=1
 
     for i in ${(k)header}; do
         case $i in
