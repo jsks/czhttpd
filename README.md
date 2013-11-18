@@ -55,12 +55,12 @@ czhttpd supports an optional configuration file as a matter of convenience. The 
 By default, czhttpd searches for czhttpd.conf in `~/.config/czhttpd`. An alternative config file can be specified with the commandline option `-c`.
 
 ### Examples:
-Start czhttpd on port 8000 with logging enabled
+- Start czhttpd on port 8000 with logging enabled<br>
 `./czhttpd -p 8000 -l ~/.config/czhttpd/czhttpd.log`
 
-Run with CGI enabled for php, python, and perl
+- Run with CGI enabled for php, python, and perl<br>
 `./czhttpd -x php,py,pl`
 
-Serve an instance of phpMyAdmin installed in ~/ with logging sent to stdout
+- Serve an instance of phpMyAdmin installed in ~/ with logging sent to stdout<br>
 `./czhttpd -v -x php -i index.php ~/phpmyadmin`
 
