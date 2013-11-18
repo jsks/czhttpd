@@ -3,12 +3,12 @@
 
 # Options
 # Clear env
-for i in ${$(export)%=*}; do
-    case $i in
-        (PWD|_)
+for z in ${$(export)%=*}; do
+    case $z in
+        (PWD|_|HOME)
             continue;;
         (*)
-            unset $i;;
+            unset $z;;
     esac
 done
 
@@ -37,23 +37,23 @@ typeset -a cgi_head cgi_body
 typeset cgi_status_code
 
 # Defaults
-DEF_CONF="~/.config/czhttpd/czhttpd.conf"   # Config file
+DEF_CONF=~/.config/czhttpd/czhttpd.conf     # Config file
 DEF_PORT=8080                               # Port
 DEF_MAX_CONNS=12                            # Max Connections
 DEF_HTTP_TIMEOUT=5                          # HTTP Timeout
-DEF_INDEX="index.html"                      # Index File
-DEF_LOG="/dev/null"                         # Log file
+DEF_INDEX=index.html                        # Index File
+DEF_LOG=/dev/null                           # Log file
 
 FIFO=/tmp/czhttpd.fifo
 
 # CGI Variables
 DEF_CGI_TIMEOUT=300
 
-SERVER_NAME="${$(hostname -i)% }"
-SERVER_ADDR="$SERVER_NAME"
-SERVER_SOFTWARE="czhttpd/1.2b"
-SERVER_PROTOCOL="HTTP/1.1"
-GATEWAY_INTERFACE="CGI/1.1"
+readonly SERVER_NAME="${$(hostname -i)% }"
+readonly SERVER_ADDR="$SERVER_NAME"
+readonly SERVER_SOFTWARE="czhttpd/1.2b"
+readonly SERVER_PROTOCOL="HTTP/1.1"
+readonly GATEWAY_INTERFACE="CGI/1.1"
 
 # Functions
 function error() {
@@ -69,7 +69,7 @@ function logger() {
 }
 
 function logger_child() {
-    print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] [pid: $sysparams[pid]] (client - $client_ip): $header[method] $header[url] $header[version] $*" >&$logfd
+    print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] [pid: $sysparams[pid]] (client $client_ip): $header[method] $header[url] $header[version] $*" >&$logfd
 }
 
 function timeout() {
@@ -119,7 +119,9 @@ exit
 }
 
 function parse_conf() {
-    [[ -f $1 ]] && { . $1 2>/dev/null || print "Cannot source config file $1"; exit 113 }
+    if [[ -f $1 ]]; then
+        . $1 || { print "Cannot source config file $1"; exit 113 }
+    fi
 
     (( $DISPLAY_HIDDEN_FILES )) && setopt GLOB_DOTS
     [[ -n $DEF_CGI_EXTS ]] && { for k in ${(s.,.)DEF_CGI_EXTS}; CGI_EXTS+="${k##*.}" }
@@ -459,10 +461,7 @@ function srv() {
 
     pathname="${DOCROOT}${$(urldecode $header[url])%/}"
     { if [[ -f $pathname ]]; then
-        if [[ $options[globdots] == off && ${pathname:t} == .* ]]; then
-            error_header 403
-            return
-        fi
+        [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403; return }
 
         if check_if_cgi $pathname; then
             exec_cgi $pathname
