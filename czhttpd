@@ -1,6 +1,7 @@
 #!/usr/bin/zsh
 # zsh web server
 
+# Options
 # Clear env
 for i in ${$(export)%=*}; do
     case $i in
@@ -26,23 +27,31 @@ setopt posix_jobs
 # Declare variable types
 integer logfd
 integer fifofd
+
 typeset -a CGI_EXTS
 
+# Internal function variables that need global scope
+typeset -A header
+typeset -a dotdir dotfiles dir files
+typeset -a cgi_head cgi_body
+typeset cgi_status_code
+
 # Defaults
-DEF_PORT=8080           # Port
-DEF_CONNS=12            # Max Connections
-DEF_TIME=5              # HTTP Timeout
-DEF_INDEX="index.html"  # Index File
+DEF_CONF="~/.config/czhttpd/czhttpd.conf"   # Config file
+DEF_PORT=8080                               # Port
+DEF_MAX_CONNS=12                            # Max Connections
+DEF_HTTP_TIMEOUT=5                          # HTTP Timeout
+DEF_INDEX="index.html"                      # Index File
+DEF_LOG="/dev/null"                         # Log file
 
 FIFO=/tmp/czhttpd.fifo
-exec {logfd}>/dev/null
 
 # CGI Variables
-CGI_TIMEOUT=300
+DEF_CGI_TIMEOUT=300
 
 SERVER_NAME="${$(hostname -i)% }"
 SERVER_ADDR="$SERVER_NAME"
-SERVER_SOFTWARE="czhttpd/1.1b"
+SERVER_SOFTWARE="czhttpd/1.2b"
 SERVER_PROTOCOL="HTTP/1.1"
 GATEWAY_INTERFACE="CGI/1.1"
 
@@ -56,11 +65,11 @@ function error() {
 }
 
 function logger() {
-    print "[ $(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS) ] $*" >&$logfd
+    print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] $*" >&$logfd
 }
 
 function logger_child() {
-    print "[ $(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS) ] Child $sysparams[pid]: $*" >&$logfd
+    print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] [pid: $sysparams[pid]] (client - $client_ip): $header[method] $header[url] $header[version] $*" >&$logfd
 }
 
 function timeout() {
@@ -71,9 +80,10 @@ function timeout() {
     }
 
     $* &; pid1=$!
-    sleep $CGI_TIMEOUT &; pid2=$!
+    sleep $DEF_CGI_TIMEOUT &; pid2=$!
 
     wait $pid1
+    kill $pid2 2>/dev/null
 }
 
 function help() {
@@ -82,20 +92,23 @@ Usage: czhttpd [OPTIONS] <file or dir>
 
 czhttpd - cloud's zsh http server
 
+Configuration Options
+    -c :    Config file location (default: ~/.config/czhttpd/czhttpd.conf)
+
 Connection Options
-    -c :    Max number of connections to accept (default: 12)
+    -m :    Max number of connections to accept (default: 12)
     -p :    Port to bind to (default: 8080)
     -t :    Connection timeout in seconds (default: 5)
 
 File Options
     -a :    Display hidden files in directories
     -i :    Specify index file (default: index.html)
-    -x :    Execute files with the given comma delimited list of
-            file extensions as CGI scripts
+    -x :    Comma delimited list of file extensions to treat as
+            CGI scripts
 
 Output Options
     -l :    Enable logging to existing file
-    -v :    Enable verbose output to stdout
+    -v :    Print log messages to stdout
     -h :    Print this help message
 
 If no file or directory is given, czhttpd defaults to serving
@@ -105,8 +118,26 @@ EOF
 exit
 }
 
+function parse_conf() {
+    [[ -f $1 ]] && { . $1 2>/dev/null || print "Cannot source config file $1"; exit 113 }
+
+    (( $DISPLAY_HIDDEN_FILES )) && setopt GLOB_DOTS
+    [[ -n $DEF_CGI_EXTS ]] && { for k in ${(s.,.)DEF_CGI_EXTS}; CGI_EXTS+="${k##*.}" }
+
+    if [[ $DEF_LOG == "/dev/null" ]]; then
+        exec {logfd}>$DEF_LOG
+    elif [[ ! -f $DEF_LOG ]]; then
+        error "Log file $DEF_LOG does not exist."
+    else
+        exec {logfd}>>$DEF_LOG
+    fi
+}
+
 function parse_args() {
-    zparseopts -K -D -A OPTS p: c: i: t: l: x: h v a || exit 113
+    zparseopts -K -D -A OPTS c: p: m: i: t: l: x: h v a || exit 113
+
+    [[ -n $OPTS[-c] && ! -f $OPTS[-c] ]] && { print "Config file $OPTS[-c] does not exist"; exit 113 }
+    parse_conf ${OPTS[-c]:-$DEF_CONF}
 
     [[ -n ${(kM)OPTS:#-h} ]] && help
     [[ -n ${(k)OPTS[-l]} && -n ${(k)OPTS[-v]} ]] && error "Can not output to both stdout and logfile"
@@ -115,7 +146,7 @@ function parse_args() {
         case $i in
             (-a)
                 setopt GLOB_DOTS;;
-            (-c|-t)
+            (-m|-t)
                 [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i] is not a valid integer";;
             (-p)
                 [[ $OPTS[$i] != <-> || $OPTS[$i] < 1024 ]] && error "$OPTS[$i] is not a valid port number.";;
@@ -125,15 +156,16 @@ function parse_args() {
                 [[ ! -f $OPTS[$i] ]] && error "File $OPTS[$i] does not exist."
                 exec {logfd}>>$OPTS[$i];;
             (-x)
+                unset CGI_EXTS && typeset -ga CGI_EXTS
                 for k in ${(s.,.)OPTS[$i]}; CGI_EXTS+="${k##*.}";;
         esac
     done
 
     logger "> Initializing czhttpd"
 
-    MAX_CONNECTIONS=${OPTS[-c]:-$DEF_CONNS}
+    MAX_CONNECTIONS=${OPTS[-m]:-$DEF_MAX_CONNS}
     PORT=${OPTS[-p]:-$DEF_PORT}
-    TIMEOUT=${OPTS[-t]:-$DEF_TIME}
+    HTTP_TIMEOUT=${OPTS[-t]:-$DEF_HTTP_TIMEOUT}
     INDEX_FILE=${OPTS[-i]:-$DEF_INDEX}
 
     if [[ -n $1 ]]; then
@@ -150,9 +182,8 @@ function http_listen() {
     listenfd=$REPLY
 }
 
-
 function parse_request() {
-    read -t $TIMEOUT -r -u $fd line || return 1
+    read -t $HTTP_TIMEOUT -r -u $fd line || return 1
     for method url version in ${(s. .)line%$'\r'}; do
         header[method]="$method"
         header[url]="${url%\?*}"
@@ -205,7 +236,7 @@ function error_header() {
             message="505 HTTP Version Not Supported";;
     esac
 
-    logger_child "$message; Request: $header[method] $header[url] $header[version]"
+    logger_child "$message"
     return_header "$message" "Content-type: text/plain; charset=UTF-8" "Content-Length: ${#message}"
     print "$message"
 }
@@ -249,7 +280,7 @@ EOF
 
 function html_fragment() {
 cat <<EOF
-<tr><td><a href=\"${1#*/}\">${1#*/}</a></td>
+<tr><td><a href="${1#*/}">${1#*/}</a></td>
 <td>$(calc_size $1)</td>
 <td>$(mime_type $1)</td></tr>
 EOF
@@ -303,7 +334,9 @@ function calc_size() {
 }
 
 function list_dir() {
-    local -a dir dotdir files dotfiles
+    unset dir dotdir files dotfiles
+    typeset -ga dir dotdir files dotfiles
+
     cd "$1"
 
     [[ "${1%/}" != "${DOCROOT%/}" ]] && dotdir+="$(html_fragment '/../')"
@@ -320,8 +353,14 @@ function list_dir() {
         fi
     done
 
-    print $dotdir $dotfiles $dir $files
     cd -
+}
+
+function send_list() {
+    return_header "200 Ok" "Transfer-Encoding: chunked" "Content-type: text/html; charset=UTF-8"
+
+    list_dir $1
+    send_chunk "$(html_template $1 $dotdir $dotfiles $dir $files)"
 }
 
 function send_file() {
@@ -354,35 +393,35 @@ function check_if_cgi() {
 }
 
 function parse_cgi() {
-    unset head body status_code
-    typeset -ga head body
-    typeset -g status_code
+    unset cgi_head cgi_body cgi_status_code
+    typeset -ga cgi_head cgi_body
+    typeset -g cgi_status_code
 
     while read -r -p line; do
         [[ -z $line || $line == $'\r' ]] && break
-        [[ $line =~ "Status:*" ]] && status_code=${line#Status: }
-        head+=${line%$'\r'}
+        [[ $line =~ "Status:*" ]] && cgi_status_code=${line#Status: }
+        cgi_head+=${line%$'\r'}
     done
 
     # We use sysread to limit the number of bytes read so as not to exceed MAX_ARG for expr
     while sysread chunk <&p; do
-        body+=$chunk
+        cgi_body+=$chunk
     done
 }
 
 function send_cgi() {
-    if [[ -n $body ]]; then
-        return_header ${status_code:-"200 Ok"} "Transfer-Encoding: chunked" $head[@]
-        send_chunk $body[@]
+    if [[ -n $cgi_body ]]; then
+        return_header ${cgi_status_code:-"200 Ok"} "Transfer-Encoding: chunked" $cgi_head[@]
+        send_chunk $cgi_body[@]
     else
-        return_header ${status_code:-"200 Ok"} "Content-Length: 0" $head[@]
+        return_header ${cgi_status_code:-"200 Ok"} "Content-Length: 0" $cgi_head[@]
     fi
 }
 
 function exec_cgi() {
     local cmd pid
 
-    local -x CONTENT_LENGTH="$header[content-length]" CONTENT_TYPE="$header[content-type]" GATEWAY_INTERFACE="$GATEWAY_INTERFACE" QUERY_STRING="${header[querystr]#\?}" REQUEST_METHOD="$header[method]" SCRIPT_NAME="${1#$DOCROOT}" SERVER_NAME="$SERVER_NAME" SERVER_ADDR="$SERVER_ADDR" SERVER_PORT="$PORT" SERVER_PROTOCOL="$SERVER_PROTOCOL" SERVER_SOFTWARE="$SERVER_SOFTWARE"
+    local -x CONTENT_LENGTH="${header[content-length]:-NULL}" CONTENT_TYPE="$header[content-type]" GATEWAY_INTERFACE="$GATEWAY_INTERFACE" QUERY_STRING="${header[querystr]#\?}" REMOTE_ADDR="$client_ip" REMOTE_HOST="NULL" REQUEST_METHOD="$header[method]" SCRIPT_NAME="${1#$DOCROOT}" SERVER_NAME="$SERVER_NAME" SERVER_ADDR="$SERVER_ADDR" SERVER_PORT="$PORT" SERVER_PROTOCOL="$SERVER_PROTOCOL" SERVER_SOFTWARE="$SERVER_SOFTWARE"
 
     local -x DOCUMENT_ROOT="$DOCROOT" REQUEST_URI="$header[url]$header[querystr]" SCRIPT_FILENAME="$1" REDIRECT_STATUS=1
 
@@ -399,7 +438,7 @@ function exec_cgi() {
 
     [[ ${1##*.} == "php" ]] && cmd="php-cgi"
 
-    logger_child "Executing cgi script: $1"
+    logger_child "Executing cgi script $1"
     coproc { timeout $cmd "$1" <&$fd }
     pid=$!
 
@@ -407,7 +446,7 @@ function exec_cgi() {
     if ! wait $pid; then
         logger_child "ERROR executing CGI script $1"
         return 1
-    elif [[ -z ${(M)${head:l}:#content-type*} ]]; then
+    elif [[ -z ${(M)${cgi_head:l}:#content-type*} ]]; then
         logger_child "ERROR CGI script $1 failed to return MIME-type"
         return 1
     else
@@ -420,7 +459,10 @@ function srv() {
 
     pathname="${DOCROOT}${$(urldecode $header[url])%/}"
     { if [[ -f $pathname ]]; then
-        [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403; return }
+        if [[ $options[globdots] == off && ${pathname:t} == .* ]]; then
+            error_header 403
+            return
+        fi
 
         if check_if_cgi $pathname; then
             exec_cgi $pathname
@@ -436,12 +478,14 @@ function srv() {
                 send_file $pathname/$INDEX_FILE
             fi
         else
-            return_header "200 Ok" "Transfer-Encoding: chunked" "Content-type: text/html; charset=UTF-8"
-            send_chunk "$(html_template $pathname $(list_dir $pathname))"
+            send_list $pathname
         fi
     else
         error_header 404
-    fi } || error_header 500
+        return
+    fi } || { error_header 500; return }
+
+    logger_child "200"
 }
 
 function cleanup() {
@@ -456,7 +500,7 @@ function cleanup() {
 
 function TRAPCHLD() {
     while read -t 0 -u $fifofd line; do
-        logger "Exiting fork $line"
+        logger "exiting fork $line"
     done
 }
 
@@ -466,7 +510,7 @@ trap "cleanup; exit" INT KILL TERM
 parse_args $*
 logger "MAX_CONNECTIONS: $MAX_CONNECTIONS"
 logger "PORT: $PORT"
-logger "TIMEOUT: $TIMEOUT"
+logger "TIMEOUT: $HTTP_TIMEOUT"
 logger "INDEX_FILE: $INDEX_FILE"
 logger "CGI_EXTENSIONS: ${CGI_EXTS:-"N/A"}"
 logger "HIDDEN_FILES: $options[globdots]"
@@ -478,24 +522,30 @@ exec {fifofd}<>$FIFO
 
 while :; do
     while (( ${#jobstates} >= $MAX_CONNECTIONS )); do
+        logger "max connections hit, temporarily unable to fork"
         zselect -r $fifofd && break
     done
 
     ztcp -a $listenfd
 
-    logger "Incoming connection, forking"
     ( trap "ztcp -c; exit" KILL TERM; trap '' PIPE
 
     fd=$REPLY
+
+    ztcp_sess=$(ztcp -L)
+    while read line; do
+        [[ $line[3] == "I" ]] && { client_ip=${line[(ws. .)3]}; break }
+    done <<< $ztcp_sess
+
     while :; do
         unset header && typeset -A header
         parse_request
 
-        [[ -z $header ]] && { logger_child "Empty request, closing"; RC=113 && break }
+        [[ -z $header ]] && { logger_child "empty request, closing"; RC=113 && break }
 
-        srv >&$fd 2>/dev/null || { logger_child "Broken socket, closing"; RC=113 && break }
+        srv >&$fd 2>/dev/null || { logger_child "broken socket, closing"; RC=113 && break }
 
-        [[ $header[Connection] == "close" ]] && { logger_child "Connection type: close, closing"; break }
+        [[ $header[Connection] == "close" ]] && { logger_child "connection type: close, closing"; break }
     done
 
     ztcp -c
@@ -503,6 +553,5 @@ while :; do
     # Mimic exit status since zsh does not have a posix compatible 'wait'
     print "$sysparams[pid]: ${RC:-0}" ) >&$fifofd &
 
-    logger "Current forks: $jobstates"
     ztcp -c $REPLY
 done

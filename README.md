@@ -9,7 +9,7 @@ The primary goal of this project was to write a web server using pure zsh - the 
 
 ---  
 <br>
-**So why write it?** Because it's fun, and I have found use for czhttpd in quickly serving files on a local network and to test web pages.
+**So why write it?** Because it's fun, and I have found use for czhttpd in quickly serving files on a local network and testing web pages.
 
 ### Features:
 - Basic support for HTTP/1.1
@@ -22,26 +22,45 @@ The primary goal of this project was to write a web server using pure zsh - the 
 
 ### Dependencies:
 - `file`
-- `coreutils`
+- `cat`
+- `expr`
 
 ### Usage:
 ```
 czhttpd [OPTIONS] <file or dir>
+- Configuration Options
+    -c :    Configuration file (default: ~/.config/czhttpd/czhttpd.conf)
+
 - Connection Options
-    -c :    Max number of connections to accept (default: 12)
+    -m :    Max number of connections to accept (default: 12)
     -p :    Port to bind to (default: 8080)
     -t :    Connection timeout in seconds (default: 5)
 
 - File Options
     -a :    Display hidden files in directories
     -i :    Specify index file (default: index.html)
-    -x :    Execute files with a given comma delimited list of file extensions as CGI scripts
+    -x :    Comma delimited list of file extensions to treat as CGI scripts
 
 - Output Options
-    -l :    Enable logging to existing file
+    -l :    Enable logging to existing file (default: /dev/null)
     -v :    Enable verbose output to stdout
     -h :    Print help message
 
-If no file or directory is given, czhttpd default to serving the current directory
+If no file or directory is given, czhttpd defaults to serving the current directory
 ```
+
+### Configuration:
+czhttpd supports an optional configuration file as a matter of convenience. The provided sample config lists the variables that can be overriden.
+
+By default, czhttpd searches for czhttpd.conf in `~/.config/czhttpd`. An alternative config file can be specified with the commandline option `-c`.
+
+### Examples:
+Start czhttpd on port 8000 with logging enabled
+`./czhttpd -p 8000 -l ~/.config/czhttpd/czhttpd.log`
+
+Run with CGI enabled for php, python, and perl
+`./czhttpd -x php,py,pl`
+
+Serve an instance of phpMyAdmin installed in ~/ with logging sent to stdout
+`./czhttpd -v -x php -i index.php ~/phpmyadmin`
 
