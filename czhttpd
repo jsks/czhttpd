@@ -21,9 +21,6 @@ zmodload zsh/datetime
 zmodload zsh/system
 zmodload zsh/zselect
 
-# Set shell options
-setopt posix_jobs
-
 # Declare variable types
 integer logfd
 integer fifofd
@@ -500,8 +497,9 @@ function cleanup() {
 }
 
 function TRAPCHLD() {
-    while read -t 0 -u $fifofd line; do
-        logger "exiting fork $line"
+    # Flush fifo data so we don't fill up the pipe (do we really care about the child's exit status?)
+    while sysread -t 0 -i $fifofd -o 1 1>/dev/null; do
+        continue
     done
 }
 
@@ -522,6 +520,7 @@ mkfifo $FIFO 2>/dev/null || error "Can not create $FIFO"
 exec {fifofd}<>$FIFO
 
 while :; do
+    # Use select to block until a child writes to fifo on exit
     while (( ${#jobstates} >= $MAX_CONNECTIONS )); do
         logger "max connections hit, temporarily unable to fork"
         zselect -r $fifofd && break
@@ -542,17 +541,16 @@ while :; do
         unset header && typeset -A header
         parse_request
 
-        [[ -z $header ]] && { logger_child "empty request, closing"; RC=113 && break }
+        [[ -z $header ]] && { logger_child "empty request, closing"; break }
 
-        srv >&$fd 2>/dev/null || { logger_child "broken socket, closing"; RC=113 && break }
+        srv >&$fd 2>/dev/null || { logger_child "broken socket, closing"; break }
 
         [[ $header[Connection] == "close" ]] && { logger_child "connection type: close, closing"; break }
     done
 
     ztcp -c
 
-    # Mimic exit status since zsh does not have a posix compatible 'wait'
-    print "$sysparams[pid]: ${RC:-0}" ) >&$fifofd &
+    print "0" ) >&$fifofd &
 
     ztcp -c $REPLY
 done
