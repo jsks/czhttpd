@@ -5,7 +5,7 @@ Simple http server written in 99% pure zsh<br>
 
 **Disclaimer**: This is *not* intended for serious use.
 
-The primary goal of this project was to write a web server using pure zsh - the exception being `expr`, and `file` which make no sense to re-implement. As such, czhttpd is not portable between shells (POSIX, what?) and, of course, has terrible performance and scalability since it uses a process pool to handle multiple connections and well, it's a shell script. I also shouldn't even have to mention the (lack of) security...
+The primary goal of this project was to write a web server using pure zsh - the exception being `expr` and `file` which make no sense to re-implement. As such, czhttpd is not portable between shells (POSIX, what?) and, of course, has terrible performance and scalability since it spawns a separate child process to handle each incoming connection. It's also a shell script. On top of that, I shouldn't even have to mention the (lack of) security...
 
 ---  
 <br>
@@ -55,11 +55,17 @@ By default, czhttpd searches for czhttpd.conf in `~/.config/czhttpd`. An alterna
 
 ### Examples:
 - Start czhttpd on port 8000 with logging enabled<br>
-`./czhttpd -p 8000 -l ~/.config/czhttpd/czhttpd.log`
+```
+./czhttpd -p 8000 -l ~/.config/czhttpd/czhttpd.log
+```
 
 - Run with CGI enabled for php, python, and perl<br>
-`./czhttpd -x php,py,pl`
+```
+./czhttpd -x php,py,pl
+```
 
 - Serve an instance of phpMyAdmin installed in ~/ with logging sent to stdout<br>
-`./czhttpd -v -x php -i index.php ~/phpmyadmin`
+```
+./czhttpd -v -x php -i index.php ~/phpmyadmin
+```
 
