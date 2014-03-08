@@ -5,7 +5,7 @@ Simple http server written in 99% pure zsh<br>
 
 **Disclaimer**: This is *not* intended for serious use.
 
-The primary goal of this project was to write a web server using pure zsh - the exception being `cat`, `expr`, and `file` which make no sense to re-implement. As such, czhttpd is not portable between shells (POSIX, what?) and, of course, has terrible performance and scalability since it uses a process pool to handle multiple connections and well, it's a shell script. I also shouldn't even have to mention the (lack of) security...
+The primary goal of this project was to write a web server using pure zsh - the exception being `expr`, and `file` which make no sense to re-implement. As such, czhttpd is not portable between shells (POSIX, what?) and, of course, has terrible performance and scalability since it uses a process pool to handle multiple connections and well, it's a shell script. I also shouldn't even have to mention the (lack of) security...
 
 ---  
 <br>
@@ -22,7 +22,6 @@ The primary goal of this project was to write a web server using pure zsh - the 
 
 ### Dependencies:
 - `file`
-- `cat`
 - `expr`
 
 ### Usage:

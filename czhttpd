@@ -87,7 +87,7 @@ function timeout() {
 }
 
 function help() {
-cat <<EOF
+<<EOF
 Usage: czhttpd [OPTIONS] <file or dir>
 
 czhttpd - cloud's zsh http server
@@ -244,7 +244,7 @@ function error_header() {
 }
 
 function html_template() {
-cat <<EOF
+<<EOF
 <!DOCTYPE html>
 <html>
 <head>
@@ -281,7 +281,7 @@ EOF
 }
 
 function html_fragment() {
-cat <<EOF
+<<EOF
 <tr><td><a href="${1#*/}">${1#*/}</a></td>
 <td>$(calc_size $1)</td>
 <td>$(mime_type $1)</td></tr>
@@ -372,7 +372,9 @@ function send_file() {
     mimetype=$(mime_type $1)
 
     return_header "200 Ok" "Content-type: $mimetype; charset=UTF-8" "Content-Length: $array[size]"
-    [[ $header[method] != "HEAD" ]] && cat $1
+    if [[ $header[method] != "HEAD" ]]; then
+        <$1
+    fi
 }
 
 function send_chunk() {
