@@ -3,12 +3,12 @@
 
 # Options
 # Clear env
-for z in ${$(export)%=*}; do
-    case $z in
+for z in ${(SM)$(export)#*=}; do
+    case ${z%=} in
         (PWD|_|HOME)
             continue;;
         (*)
-            unset $z;;
+            unset ${z%=};;
     esac
 done
 
@@ -57,7 +57,7 @@ function error() {
     print "Error: $*" >&2 >&$logfd
 
     exec {logfd}>&-
-    rm $FIFO 2>/dev/null
+    rm $DEF_FIFO 2>/dev/null
     ztcp -c; exit 113
 }
 
@@ -256,31 +256,35 @@ function html_template() {
 <head>
 <style type="text/css">
 a {text-decoration: none;}
-table { border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; border-collapse: collapse; margin: 4px; }
+a:hover, a:focus { color: white; background: rgba(0,0,0,0.3); cursor: pointer; }
+h2 { margin-bottom: 10px }
+table { border-collapse: collapse; }
 thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; }
 thead th:nth-child(2) { text-align: right; padding-right: 12px; }
 tbody td:nth-child(2) { text-align: right; padding-right: 12px; }
 tbody td:first-child { padding-right: 30px; }
-tbody tr:hover { background: rgba(0,0,0,0.3); color: #fff; cursor: pointer; }
+div.list { background-color: #F5F5F5; border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; margin: 4px;}
+div.footer { font: 90% monospace; color: grey; font-style: italic; padding-left: 4px; }
 </style>
 <title>czhttpd</title>
 </head>
 <body>
-<h1>Index of $1</h1>
-<table padding=10>
-    <thead>
-    <tr>
-        <th>Name</th>
-        <tsize>
-        <th>Size</th>
-        </tsize>
-        <th>Type</th>
-    </tr>
-    </thead>
-    <tbody>
-    $@[2,-1]
-    </tbody>
-</table>
+<h2>Index of $1</h2>
+<div class=list>
+    <table>
+        <thead>
+        <tr>
+            <th>Name</th>
+            <th>Size</th>
+            <th>Type</th>
+        </tr>
+        </thead>
+        <tbody>
+        $@[2,-1]
+        </tbody>
+    </table>
+</div>
+<div class=footer>$SERVER_SOFTWARE</div>
 </body>
 </html>
 EOF
@@ -321,6 +325,7 @@ function mime_type() {
             print "text/css";;
         (*)
             mtype=$(file --mime-type -bL $1)
+            [[ $mtype == *"no read permission" ]] && { print "application/octet-stream"; continue }
             [[ ${mtype:h} == text ]] && { print "text/plain"; continue }
             print "${mtype#application/x-executable}";;
     esac
@@ -345,7 +350,7 @@ function list_dir() {
     unset dir dotdir files dotfiles
     typeset -ga dir dotdir files dotfiles
 
-    cd "$1"
+    cd "$1" || return 1
 
     [[ "${1%/}" != "${DOCROOT%/}" ]] && dotdir+="$(html_fragment '/../')"
 
@@ -365,9 +370,9 @@ function list_dir() {
 }
 
 function send_list() {
-    return_header "200 Ok" "Transfer-Encoding: chunked" "Content-type: text/html; charset=UTF-8"
+    list_dir $1 || return 1
 
-    list_dir $1
+    return_header "200 Ok" "Transfer-Encoding: chunked" "Content-type: text/html; charset=UTF-8"
     send_chunk "$(html_template $1 $dotdir $dotfiles $dir $files)"
 }
 
@@ -488,7 +493,7 @@ function srv() {
             if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
                 error_header 301 "http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
             else
-                send_list "$pathname"
+                send_list "$pathname" || { error_header 403; return }
             fi
         fi
     else
@@ -506,7 +511,7 @@ function cleanup() {
 
     logger "> Exiting main"
     exec {logfd}>&-; exec {fifofd}>&-
-    rm $FIFO; ztcp -c
+    rm $DEF_FIFO; ztcp -c
 }
 
 function TRAPCHLD() {

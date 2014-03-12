@@ -33,7 +33,7 @@ czhttpd [OPTIONS] <file or dir>
 - Connection Options
     -m :    Max number of connections to accept (default: 12)
     -p :    Port to bind to (default: 8080)
-    -t :    Connection timeout in seconds (default: 5)
+    -t :    Connection timeout in seconds (default: 30)
 
 - File Options
     -a :    Display hidden files in directories
@@ -68,9 +68,6 @@ By default, czhttpd searches for czhttpd.conf in `~/.config/czhttpd`. An alterna
 ```
 ./czhttpd -v -x php -i index.php ~/phpmyadmin
 ```
-
-### Known Bug:
-czhttpd fails when run inside a git repository and using zsh's vcs_info in the shell prompt. Work around: `cd` to a non-git directory and specify the git directory as a cli option.
 
 ---
 
