@@ -34,14 +34,14 @@ typeset -a cgi_head cgi_body
 typeset cgi_status_code
 
 # Defaults
-DEF_CONF=~/.config/czhttpd/czhttpd.conf     # Config file
-DEF_PORT=8080                               # Port
-DEF_MAX_CONNS=12                            # Max Connections
-DEF_HTTP_TIMEOUT=5                          # HTTP Timeout
-DEF_INDEX=index.html                        # Index File
-DEF_LOG=/dev/null                           # Log file
+DEF_CONF=~/.config/czhttpd/czhttpd.conf
+DEF_PORT=8080
+DEF_MAX_CONNS=12
+DEF_HTTP_TIMEOUT=30
+DEF_INDEX=index.html
+DEF_LOG=/dev/null
 
-FIFO=/tmp/czhttpd.fifo
+DEF_FIFO=/tmp/czhttpd.fifo
 
 # CGI Variables
 DEF_CGI_TIMEOUT=300
@@ -95,7 +95,7 @@ Configuration Options
 Connection Options
     -m :    Max number of connections to accept (default: 12)
     -p :    Port to bind to (default: 8080)
-    -t :    Connection timeout in seconds (default: 5)
+    -t :    Connection timeout in seconds (default: 30)
 
 File Options
     -a :    Display hidden files in directories
@@ -120,7 +120,7 @@ function parse_conf() {
         . $1 || { print "Cannot source config file $1"; exit 113 }
     fi
 
-    (( $DISPLAY_HIDDEN_FILES )) && setopt GLOB_DOTS
+    (( $DEF_DISPLAY_HIDDEN_FILES )) && setopt GLOB_DOTS
     [[ -n $DEF_CGI_EXTS ]] && { for k in ${(s.,.)DEF_CGI_EXTS}; CGI_EXTS+="${k##*.}" }
 
     if [[ $DEF_LOG == "/dev/null" ]]; then
@@ -200,6 +200,7 @@ function parse_request() {
 
 function check_request() {
     [[ $header[version] != "HTTP/1.1" ]] && { error_header 505; return 1 }
+    [[ -z $header[host] ]] && { error_header 400; return 1 }
 
     case $header[method] in
         ("HEAD"|"GET"|"POST")
@@ -212,7 +213,7 @@ function check_request() {
 
 function return_header() {
     print -n "HTTP/1.1 $1\r\n"
-    print -n "Connection: keep-alive\r\n"
+    print -n "Connection: ${header[connection]:-keep-alive}\r\n"
     print -n "Date: $(export TZ=UTC && strftime "%a, %d %b %Y %H:%M:%S" $EPOCHSECONDS) GMT\r\n"
     print -n "Server: czhttpd\r\n"
     for i in "$@[2,-1]"; do
@@ -222,7 +223,15 @@ function return_header() {
 }
 
 function error_header() {
+    local message
+    local -a add_headers
+
     case "$1" in
+        (301)
+            message="301 Moved Permanently"
+            add_headers+="Location: $2";;
+        (400)
+            message="400 Bad Request";;
         (403)
             message="403 Forbidden";;
         (404)
@@ -236,7 +245,7 @@ function error_header() {
     esac
 
     logger_child "$message"
-    return_header "$message" "Content-type: text/plain; charset=UTF-8" "Content-Length: ${#message}"
+    return_header "$message" "Content-type: text/plain; charset=UTF-8" "Content-Length: ${#message}" $add_headers[@]
     print "$message"
 }
 
@@ -456,9 +465,9 @@ function exec_cgi() {
 }
 
 function srv() {
-    check_request || return 1
+    check_request || return
 
-    pathname="${DOCROOT}${$(urldecode $header[url])%/}"
+    pathname="${DOCROOT}$(urldecode $header[url])"
     { if [[ -f $pathname ]]; then
         [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403; return }
 
@@ -476,7 +485,11 @@ function srv() {
                 send_file $pathname/$INDEX_FILE
             fi
         else
-            send_list $pathname
+            if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
+                error_header 301 "http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
+            else
+                send_list "$pathname"
+            fi
         fi
     else
         error_header 404
@@ -516,8 +529,8 @@ logger "HIDDEN_FILES: $options[globdots]"
 
 http_listen
 
-mkfifo $FIFO 2>/dev/null || error "Can not create $FIFO"
-exec {fifofd}<>$FIFO
+mkfifo $DEF_FIFO 2>/dev/null || error "Can not create $DEF_FIFO"
+exec {fifofd}<>$DEF_FIFO
 
 while :; do
     # Use select to block until a child writes to fifo on exit
@@ -543,7 +556,7 @@ while :; do
 
         [[ -z $header ]] && { logger_child "empty request, closing"; break }
 
-        srv >&$fd 2>/dev/null || { logger_child "broken socket, closing"; break }
+        srv >&$fd 2>/dev/null
 
         [[ $header[Connection] == "close" ]] && { logger_child "connection type: close, closing"; break }
     done
