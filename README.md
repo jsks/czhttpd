@@ -31,6 +31,7 @@ czhttpd [OPTIONS] <file or dir>
     -c :    Configuration file (default: ~/.config/czhttpd/czhttpd.conf)
 
 - Connection Options
+    -c :    Force connection: close for all HTTP/1.1 response headers
     -m :    Max number of connections to accept (default: 12)
     -p :    Port to bind to (default: 8080)
     -t :    Connection timeout in seconds (default: 30)
@@ -38,6 +39,7 @@ czhttpd [OPTIONS] <file or dir>
 - File Options
     -a :    Display hidden files in directories
     -i :    Specify index file (default: index.html)
+    -s :    Allow czhttpd to follow symlinks
     -x :    Comma delimited list of file extensions to treat as CGI scripts
 
 - Output Options

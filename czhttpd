@@ -25,7 +25,14 @@ zmodload zsh/zselect
 integer logfd
 integer fifofd
 
-typeset -a CGI_EXTS
+typeset PORT
+typeset MAX_CONNS
+typeset HTTP_KEEP_ALIVE
+typeset HTTP_TIMEOUT
+typeset FOLLOW_SYMLINKS
+typeset INDEX_FILE
+typeset FIFO
+typeset -a CGI_EXTS_ARRAY
 
 # Internal function variables that need global scope
 typeset -A header
@@ -33,19 +40,10 @@ typeset -a dotdir dotfiles dir files
 typeset -a cgi_head cgi_body
 typeset cgi_status_code
 
-# Defaults
-DEF_CONF=~/.config/czhttpd/czhttpd.conf
-DEF_PORT=8080
-DEF_MAX_CONNS=12
-DEF_HTTP_TIMEOUT=30
-DEF_INDEX=index.html
-DEF_LOG=/dev/null
-
-DEF_FIFO=/tmp/czhttpd.fifo
-
 # CGI Variables
-DEF_CGI_TIMEOUT=300
+CGI_TIMEOUT=300
 
+# Immutable vars
 readonly SERVER_NAME="${$(hostname -i)% }"
 readonly SERVER_ADDR="$SERVER_NAME"
 readonly SERVER_SOFTWARE="czhttpd/1.2b"
@@ -57,7 +55,7 @@ function error() {
     print "Error: $*" >&2 >&$logfd
 
     exec {logfd}>&-
-    rm $DEF_FIFO 2>/dev/null
+    rm $FIFO 2>/dev/null
     ztcp -c; exit 113
 }
 
@@ -77,7 +75,7 @@ function timeout() {
     }
 
     $* &; pid1=$!
-    sleep $DEF_CGI_TIMEOUT &; pid2=$!
+    sleep $CGI_TIMEOUT &; pid2=$!
 
     wait $pid1
     kill $pid2 2>/dev/null
@@ -90,9 +88,10 @@ Usage: czhttpd [OPTIONS] <file or dir>
 czhttpd - cloud's zsh http server
 
 Configuration Options
-    -c :    Config file location (default: ~/.config/czhttpd/czhttpd.conf)
+    -C :    Config file location (default: ~/.config/czhttpd/czhttpd.conf)
 
 Connection Options
+    -c :    Force connection: close for all HTTP/1.1 response headers
     -m :    Max number of connections to accept (default: 12)
     -p :    Port to bind to (default: 8080)
     -t :    Connection timeout in seconds (default: 30)
@@ -100,6 +99,7 @@ Connection Options
 File Options
     -a :    Display hidden files in directories
     -i :    Specify index file (default: index.html)
+    -s :    Allow czhttpd to follow symlinks
     -x :    Comma delimited list of file extensions to treat as
             CGI scripts
 
@@ -117,26 +117,26 @@ exit
 
 function parse_conf() {
     if [[ -f $1 ]]; then
-        . $1 || { print "Cannot source config file $1"; exit 113 }
-    fi
+        . $1 || error "Cannot source config file $1"
 
-    (( $DEF_DISPLAY_HIDDEN_FILES )) && setopt GLOB_DOTS
-    [[ -n $DEF_CGI_EXTS ]] && { for k in ${(s.,.)DEF_CGI_EXTS}; CGI_EXTS+="${k##*.}" }
+        (( $DISPLAY_HIDDEN_FILES )) && setopt GLOB_DOTS
+        [[ -n $CGI_EXTS ]] && { for k in ${(s.,.)CGI_EXTS}; CGI_EXTS_ARRAY+="${k##*.}" }
 
-    if [[ $DEF_LOG == "/dev/null" ]]; then
-        exec {logfd}>$DEF_LOG
-    elif [[ ! -f $DEF_LOG ]]; then
-        error "Log file $DEF_LOG does not exist."
-    else
-        exec {logfd}>>$DEF_LOG
+        if [[ $LOG_FILE == "/dev/null" ]]; then
+            exec {logfd}>$LOG_FILE
+        elif [[ ! -f $LOG_FILE ]]; then
+            error "Log file $LOG_FILE does not exist."
+        else
+            exec {logfd}>>$LOG_FILE
+        fi
     fi
 }
 
 function parse_args() {
-    zparseopts -K -D -A OPTS c: p: m: i: t: l: x: h v a || exit 113
+    zparseopts -K -D -A OPTS C: i: l: m: p: t: x: a c h s v || error 2>/dev/null
 
-    [[ -n $OPTS[-c] && ! -f $OPTS[-c] ]] && { print "Config file $OPTS[-c] does not exist"; exit 113 }
-    parse_conf ${OPTS[-c]:-$DEF_CONF}
+    [[ -n $OPTS[-C] && ! -f $OPTS[-C] ]] && error "Config file $OPTS[-C] does not exist"
+    parse_conf ${OPTS[-C]:-~/.config/czhttpd/czhttpd.conf}
 
     [[ -n ${(kM)OPTS:#-h} ]] && help
     [[ -n ${(k)OPTS[-l]} && -n ${(k)OPTS[-v]} ]] && error "Can not output to both stdout and logfile"
@@ -145,27 +145,33 @@ function parse_args() {
         case $i in
             (-a)
                 setopt GLOB_DOTS;;
-            (-m|-t)
-                [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i] is not a valid integer";;
-            (-p)
-                [[ $OPTS[$i] != <-> || $OPTS[$i] < 1024 ]] && error "$OPTS[$i] is not a valid port number.";;
-            (-v)
-                exec {logfd}>&1 2>/dev/null;;
+            (-c)
+                HTTP_KEEP_ALIVE=0;;
+            (-i)
+                INDEX_FILE=$OPTS[$i];;
             (-l)
                 [[ ! -f $OPTS[$i] ]] && error "File $OPTS[$i] does not exist."
                 exec {logfd}>>$OPTS[$i];;
+            (-m)
+                [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i] is not a valid integer"
+                MAX_CONNECTIONS=$OPTS[$1];;
+            (-p)
+                [[ $OPTS[$i] != <-> || $OPTS[$i] < 1024 ]] && error "$OPTS[$i] is not a valid port number."
+                PORT=$OPTS[$i];;
+            (-s)
+                FOLLOW_SYMLINKS=1;;
+            (-t)
+                [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i] is not a valid integer"
+                HTTP_TIMEOUT=$OPTS[$i];;
+            (-v)
+                exec {logfd}>&1 2>/dev/null;;
             (-x)
-                unset CGI_EXTS && typeset -ga CGI_EXTS
-                for k in ${(s.,.)OPTS[$i]}; CGI_EXTS+="${k##*.}";;
+                unset CGI_EXTS_ARRAY && typeset -ga CGI_EXTS_ARRAY
+                for k in ${(s.,.)OPTS[$i]}; CGI_EXTS_ARRAY+="${k##*.}";;
         esac
     done
 
     logger "> Initializing czhttpd"
-
-    MAX_CONNECTIONS=${OPTS[-m]:-$DEF_MAX_CONNS}
-    PORT=${OPTS[-p]:-$DEF_PORT}
-    HTTP_TIMEOUT=${OPTS[-t]:-$DEF_HTTP_TIMEOUT}
-    INDEX_FILE=${OPTS[-i]:-$DEF_INDEX}
 
     if [[ -n $1 ]]; then
         [[ -e $1 ]] || error "$1 is not a valid directory or file."
@@ -470,8 +476,6 @@ function exec_cgi() {
 }
 
 function srv() {
-    check_request || return
-
     pathname="${DOCROOT}$(urldecode $header[url])"
     { if [[ -f $pathname ]]; then
         [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403; return }
@@ -511,7 +515,7 @@ function cleanup() {
 
     logger "> Exiting main"
     exec {logfd}>&-; exec {fifofd}>&-
-    rm $DEF_FIFO; ztcp -c
+    rm $FIFO; ztcp -c
 }
 
 function TRAPCHLD() {
@@ -524,18 +528,35 @@ function TRAPCHLD() {
 # Main
 trap "cleanup; exit" INT KILL TERM
 
+# By default discard logging output
+exec {logfd}>/dev/null
+
+# Parse cli options and config file
 parse_args $*
+
+# Set defaults
+: ${MAX_CONNECTIONS:=12}
+: ${PORT:=8080}
+: ${HTTP_KEEP_ALIVE:=1}
+: ${HTTP_TIMEOUT:=30}
+: ${FOLLOW_SYMLINKS:=0}
+: ${INDEX_FILE:=index.html}
+: ${CGI_EXTS_ARRAY:=""}
+: ${FIFO:=/tmp/czhttpd.fifo}
+
 logger "MAX_CONNECTIONS: $MAX_CONNECTIONS"
 logger "PORT: $PORT"
+logger "KEEP_ALIVE: $HTTP_KEEP_ALIVE"
 logger "TIMEOUT: $HTTP_TIMEOUT"
+logger "FOLLOW_SYMLINKS: $FOLLOW_SYMLINKS"
 logger "INDEX_FILE: $INDEX_FILE"
-logger "CGI_EXTENSIONS: ${CGI_EXTS:-"N/A"}"
+logger "CGI_EXTENSIONS: ${CGI_EXTS_ARRAY:-"N/A"}"
 logger "HIDDEN_FILES: $options[globdots]"
 
 http_listen
 
-mkfifo $DEF_FIFO 2>/dev/null || error "Can not create $DEF_FIFO"
-exec {fifofd}<>$DEF_FIFO
+mkfifo $FIFO 2>/dev/null || error "Can not create $FIFO"
+exec {fifofd}<>$FIFO
 
 while :; do
     # Use select to block until a child writes to fifo on exit
@@ -558,8 +579,9 @@ while :; do
     while :; do
         unset header && typeset -A header
         parse_request
-
         [[ -z $header ]] && { logger_child "empty request, closing"; break }
+
+        check_request || continue
 
         srv >&$fd 2>/dev/null
 
