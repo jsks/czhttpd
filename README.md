@@ -28,10 +28,11 @@ The primary goal of this project was to write a web server using pure zsh - the 
 ```
 czhttpd [OPTIONS] <file or dir>
 - Configuration Options
-    -c :    Configuration file (default: ~/.config/czhttpd/czhttpd.conf)
+    -C :    Configuration file (default: ~/.config/czhttpd/czhttpd.conf)
 
 - Connection Options
-    -c :    Force connection: close for all HTTP/1.1 response headers
+    -c :    Disable http keep-alive and force 'connection: close' for all 
+            HTTP/1.1 response headers
     -m :    Max number of connections to accept (default: 12)
     -p :    Port to bind to (default: 8080)
     -t :    Connection timeout in seconds (default: 30)
