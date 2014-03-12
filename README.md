@@ -69,3 +69,9 @@ By default, czhttpd searches for czhttpd.conf in `~/.config/czhttpd`. An alterna
 ./czhttpd -v -x php -i index.php ~/phpmyadmin
 ```
 
+### Known Bug:
+czhttpd fails when run inside a git repository and using zsh's vcs_info in the shell prompt. Work around: `cd` to a non-git directory and specify the git directory as a cli option.
+
+---
+
+I am not much of a programmer especially with zsh so if you have any suggestions or added features please feel free to contribute!
