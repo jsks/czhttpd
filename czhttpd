@@ -21,6 +21,9 @@ zmodload zsh/datetime
 zmodload zsh/system
 zmodload zsh/zselect
 
+# zsh options
+unsetopt multibyte
+
 # Declare variable types
 integer logfd
 integer fifofd
@@ -210,7 +213,7 @@ function parse_request() {
 
 function check_request() {
     [[ $header[version] == "HTTP/1.1" || $header[version] == "HTTP/1.0" ]] || { error_header 505; return 1 }
-    [[ $header[version == "HTTP/1.1" && -z $header[host] ]] && { error_header 400; return 1 }
+    [[ $header[version] == "HTTP/1.1" && -z $header[host] ]] && { error_header 400; return 1 }
 
     case $header[method] in
         ("HEAD"|"GET"|"POST")
@@ -405,7 +408,7 @@ function send_file() {
 function send_chunk() {
     if [[ $header[method] != "HEAD" ]]; then
         for i in {1..$#}; do
-            printf '%x\r\n' "$(expr "x$@[$i]" : '.*' - 1)"
+            printf '%x\r\n' "$(print ${#@[$i]})"
             printf '%s\r\n' "$@[$i]"
         done
         printf '%x\r\n' "0"
@@ -432,7 +435,6 @@ function parse_cgi() {
         cgi_head+=${line%$'\r'}
     done
 
-    # We use sysread to limit the number of bytes read so as not to exceed MAX_ARG for expr
     while sysread chunk <&p; do
         cgi_body+=$chunk
     done
