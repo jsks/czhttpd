@@ -150,13 +150,17 @@ function parse_args() {
             (-i)
                 INDEX_FILE=$OPTS[$i];;
             (-l)
-                [[ ! -f $OPTS[$i] ]] && error "File $OPTS[$i] does not exist."
+                [[ ! -f $OPTS[$i] ]] && error "File $OPTS[$i] does not exist"
                 exec {logfd}>>$OPTS[$i];;
             (-m)
                 [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i] is not a valid integer"
                 MAX_CONNECTIONS=$OPTS[$1];;
             (-p)
-                [[ $OPTS[$i] != <-> || $OPTS[$i] < 1024 ]] && error "$OPTS[$i] is not a valid port number."
+                if [[ $OPTS[$i] != <-> ]]; then
+                    error "$OPTS[$i] is not a valid integer"
+                else
+                    (( $OPTS[$i] < 1024 )) && error "$OPTS[$i] is not a valid port number"
+                fi
                 PORT=$OPTS[$i];;
             (-s)
                 FOLLOW_SYMLINKS=1;;
@@ -196,7 +200,7 @@ function parse_request() {
         header[version]="$version"
     done
 
-    while read -r -u $fd line; do
+    while read -t $HTTP_TIMEOUT -r -u $fd line; do
         [[ -n $line && $line != $'\r' ]] || break
         for key value in ${(s/: /)line%$'\r'}; do
             header[${(L)key}]="$value"
@@ -205,8 +209,8 @@ function parse_request() {
 }
 
 function check_request() {
-    [[ $header[version] != "HTTP/1.1" ]] && { error_header 505; return 1 }
-    [[ -z $header[host] ]] && { error_header 400; return 1 }
+    [[ $header[version] == "HTTP/1.1" || $header[version] == "HTTP/1.0" ]] || { error_header 505; return 1 }
+    [[ $header[version == "HTTP/1.1" && -z $header[host] ]] && { error_header 400; return 1 }
 
     case $header[method] in
         ("HEAD"|"GET"|"POST")
@@ -219,7 +223,11 @@ function check_request() {
 
 function return_header() {
     print -n "HTTP/1.1 $1\r\n"
-    print -n "Connection: ${header[connection]:-keep-alive}\r\n"
+    if [[ $HTTP_KEEP_ALIVE == 0 || $header[version] != "HTTP/1.1" ]]; then
+        print -n "Connection: close\r\n"
+    else
+        print -n "Connection: ${header[connection]:-keep-alive}\r\n"
+    fi
     print -n "Date: $(export TZ=UTC && strftime "%a, %d %b %Y %H:%M:%S" $EPOCHSECONDS) GMT\r\n"
     print -n "Server: czhttpd\r\n"
     for i in "$@[2,-1]"; do
@@ -485,8 +493,9 @@ function srv() {
         else
             send_file $pathname
         fi
-
     elif [[ -d $pathname ]]; then
+        [[ $FOLLOW_SYMLINKS == 0 && -h ${pathname%/} ]] && { error_header 403; return }
+
         if [[ -f $pathname/$INDEX_FILE ]]; then
             if check_if_cgi $INDEX_FILE; then
                 exec_cgi $pathname/$INDEX_FILE
@@ -585,7 +594,10 @@ while :; do
 
         srv >&$fd 2>/dev/null
 
-        [[ $header[Connection] == "close" ]] && { logger_child "connection type: close, closing"; break }
+        if [[ $HTTP_KEEP_ALIVE == 0 || $header[Connection] == "close" ]]; then
+            logger_child "connection type: close, closing"
+            break
+        fi
     done
 
     ztcp -c
