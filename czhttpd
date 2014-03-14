@@ -28,13 +28,6 @@ unsetopt multibyte
 integer logfd
 integer fifofd
 
-typeset PORT
-typeset MAX_CONNS
-typeset HTTP_KEEP_ALIVE
-typeset HTTP_TIMEOUT
-typeset FOLLOW_SYMLINKS
-typeset INDEX_FILE
-typeset FIFO
 typeset -a CGI_EXTS_ARRAY
 
 # Internal function variables that need global scope
@@ -42,16 +35,6 @@ typeset -A header
 typeset -a dotdir dotfiles dir files
 typeset -a cgi_head cgi_body
 typeset cgi_status_code
-
-# CGI Variables
-CGI_TIMEOUT=300
-
-# Immutable vars
-readonly SERVER_NAME="${$(hostname -i)% }"
-readonly SERVER_ADDR="$SERVER_NAME"
-readonly SERVER_SOFTWARE="czhttpd/1.2b"
-readonly SERVER_PROTOCOL="HTTP/1.1"
-readonly GATEWAY_INTERFACE="CGI/1.1"
 
 # Functions
 function error() {
@@ -82,6 +65,19 @@ function timeout() {
 
     wait $pid1
     kill $pid2 2>/dev/null
+}
+
+function ip_addr() {
+    local -a tcp_list
+    local -a ip
+
+    tcp_list=("${(f@)$(</proc/net/tcp)}")
+
+    for i v in "${(s..)tcp_list[4][7,14]}"; do
+        ip+="0x${(L)i}${(L)v}"
+    done
+
+    printf "%d.%d.%d.%d\n" ${(Oa)ip[@]}
 }
 
 function help() {
@@ -125,11 +121,9 @@ function parse_conf() {
         (( $DISPLAY_HIDDEN_FILES )) && setopt GLOB_DOTS
         [[ -n $CGI_EXTS ]] && { for k in ${(s.,.)CGI_EXTS}; CGI_EXTS_ARRAY+="${k##*.}" }
 
-        if [[ $LOG_FILE == "/dev/null" ]]; then
-            exec {logfd}>$LOG_FILE
-        elif [[ ! -f $LOG_FILE ]]; then
+        if [[ ! -f $LOG_FILE ]]; then
             error "Log file $LOG_FILE does not exist."
-        else
+        elif [[ $LOG_FILE != "/dev/null" ]]; then
             exec {logfd}>>$LOG_FILE
         fi
     fi
@@ -507,6 +501,7 @@ function srv() {
         else
             if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
                 error_header 301 "http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
+                return
             else
                 send_list "$pathname" || { error_header 403; return }
             fi
@@ -553,7 +548,17 @@ parse_args $*
 : ${FOLLOW_SYMLINKS:=0}
 : ${INDEX_FILE:=index.html}
 : ${CGI_EXTS_ARRAY:=""}
+: ${CGI_TIMEOUT:=300}
 : ${FIFO:=/tmp/czhttpd.fifo}
+
+# Immutable Vars
+readonly SERVER_NAME="$(ip_addr)"
+readonly SERVER_ADDR="$SERVER_NAME"
+readonly SERVER_SOFTWARE="czhttpd/1.2b"
+readonly SERVER_PROTOCOL="HTTP/1.1"
+readonly GATEWAY_INTERFACE="CGI/1.1"
+
+logger $SERVER_ADDR
 
 logger "MAX_CONNECTIONS: $MAX_CONNECTIONS"
 logger "PORT: $PORT"
@@ -562,6 +567,7 @@ logger "TIMEOUT: $HTTP_TIMEOUT"
 logger "FOLLOW_SYMLINKS: $FOLLOW_SYMLINKS"
 logger "INDEX_FILE: $INDEX_FILE"
 logger "CGI_EXTENSIONS: ${CGI_EXTS_ARRAY:-"N/A"}"
+logger "CGI_TIMEOUT: $CGI_TIMEOUT"
 logger "HIDDEN_FILES: $options[globdots]"
 
 http_listen
