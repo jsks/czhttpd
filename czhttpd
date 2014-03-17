@@ -411,7 +411,9 @@ function send_chunk() {
 }
 
 function check_if_cgi() {
-    for i in $CGI_EXTS; [[ ${1##*.} == $i ]] && break
+    [[ -z $CGI_EXTS_ARRAY ]] && return 1
+
+    for i in $CGI_EXTS_ARRAY; [[ ${1##*.} == $i ]] && break
 
     [[ $? != 0 || ! -x $1 ]] && return 1
 
