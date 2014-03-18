@@ -384,7 +384,7 @@ function send_list() {
     list_dir $1 || return 1
 
     return_header "200 Ok" "Transfer-Encoding: chunked" "Content-type: text/html; charset=UTF-8"
-    send_chunk "$(html_template $1 $dotdir $dotfiles $dir $files)"
+    html_template $1 $dotdir $dotfiles $dir $files | send_chunk
 }
 
 function send_file() {
@@ -401,10 +401,13 @@ function send_file() {
 
 function send_chunk() {
     if [[ $header[method] != "HEAD" ]]; then
-        for i in {1..$#}; do
-            printf '%x\r\n' "$(print ${#@[$i]})"
-            printf '%s\r\n' "$@[$i]"
+        local buff
+
+        while sysread buff; do
+            printf '%x\r\n' "$(print ${#buff})"
+            printf '%s\r\n' "$buff"
         done
+
         printf '%x\r\n' "0"
         printf '\r\n'
     fi
@@ -420,32 +423,11 @@ function check_if_cgi() {
     return 0
 }
 
-function parse_cgi() {
-    unset cgi_head cgi_body cgi_status_code
-    typeset -ga cgi_head cgi_body
+function exec_cgi() {
+    unset cgi_head cgi_status_code
+    typeset -ga cgi_head
     typeset -g cgi_status_code
 
-    while read -r -p line; do
-        [[ -z $line || $line == $'\r' ]] && break
-        [[ $line =~ "Status:*" ]] && cgi_status_code=${line#Status: }
-        cgi_head+=${line%$'\r'}
-    done
-
-    while sysread chunk <&p; do
-        cgi_body+=$chunk
-    done
-}
-
-function send_cgi() {
-    if [[ -n $cgi_body ]]; then
-        return_header ${cgi_status_code:-"200 Ok"} "Transfer-Encoding: chunked" $cgi_head[@]
-        send_chunk $cgi_body[@]
-    else
-        return_header ${cgi_status_code:-"200 Ok"} "Content-Length: 0" $cgi_head[@]
-    fi
-}
-
-function exec_cgi() {
     local cmd pid
 
     local -x CONTENT_LENGTH="${header[content-length]:-NULL}" CONTENT_TYPE="$header[content-type]" GATEWAY_INTERFACE="$GATEWAY_INTERFACE" QUERY_STRING="${header[querystr]#\?}" REMOTE_ADDR="$client_ip" REMOTE_HOST="NULL" REQUEST_METHOD="$header[method]" SCRIPT_NAME="${1#$DOCROOT}" SERVER_NAME="$SERVER_NAME" SERVER_ADDR="$SERVER_ADDR" SERVER_PORT="$PORT" SERVER_PROTOCOL="$SERVER_PROTOCOL" SERVER_SOFTWARE="$SERVER_SOFTWARE"
@@ -469,15 +451,23 @@ function exec_cgi() {
     coproc { timeout $cmd "$1" <&$fd }
     pid=$!
 
-    parse_cgi
+    while read -r -p line; do
+        [[ -z $line || $line == $'\r' ]] && break
+        [[ $line =~ "Status:*" ]] && cgi_status_code=${line#Status: }
+        cgi_head+=${line%$'\r'}
+    done
+
+    if [[ -z ${(M)${cgi_head:l}:#content-type*} ]]; then
+        logger_child "ERROR CGI script $1 failed to return MIME-type"
+        return 1
+    fi
+
+    return_header ${cgi_status_code:-"200 Ok"} "Transfer-Encoding: chunked" $cgi_head[@]
+    send_chunk <&p
+
     if ! wait $pid; then
         logger_child "ERROR executing CGI script $1"
         return 1
-    elif [[ -z ${(M)${cgi_head:l}:#content-type*} ]]; then
-        logger_child "ERROR CGI script $1 failed to return MIME-type"
-        return 1
-    else
-        send_cgi
     fi
 }
 
@@ -559,8 +549,6 @@ readonly SERVER_ADDR="$SERVER_NAME"
 readonly SERVER_SOFTWARE="czhttpd/1.2b"
 readonly SERVER_PROTOCOL="HTTP/1.1"
 readonly GATEWAY_INTERFACE="CGI/1.1"
-
-logger $SERVER_ADDR
 
 logger "MAX_CONNECTIONS: $MAX_CONNECTIONS"
 logger "PORT: $PORT"
