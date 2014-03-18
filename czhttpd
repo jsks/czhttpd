@@ -23,6 +23,7 @@ zmodload zsh/zselect
 
 # zsh options
 unsetopt multibyte
+setopt posix_jobs
 
 # Declare variable types
 integer logfd
