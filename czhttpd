@@ -16,6 +16,7 @@ export PATH=/bin:/usr/bin
 
 # Load Modules
 zmodload zsh/net/tcp
+zmodload zsh/files
 zmodload zsh/stat
 zmodload zsh/datetime
 zmodload zsh/system
