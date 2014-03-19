@@ -191,6 +191,8 @@ function http_listen() {
 }
 
 function parse_request() {
+    unset header; typeset -gA header
+
     read -t $HTTP_TIMEOUT -r -u $fd line || return 1
     for method url version in ${(s. .)line%$'\r'}; do
         header[method]="$method"
@@ -208,8 +210,15 @@ function parse_request() {
 }
 
 function check_request() {
-    [[ $header[version] == "HTTP/1.1" || $header[version] == "HTTP/1.0" ]] || { error_header 505; return 1 }
-    [[ $header[version] == "HTTP/1.1" && -z $header[host] ]] && { error_header 400; return 1 }
+    case $header[version] in
+        ("HTTP/1.1")
+            [[ -z $header[host] ]] && { error_header 400; return 1 };;
+        ("HTTP/1.0")
+            continue;;
+        (*)
+            error_header 505
+            return;;
+    esac
 
     case $header[method] in
         ("HEAD"|"GET"|"POST")
@@ -222,11 +231,13 @@ function check_request() {
 
 function return_header() {
     print -n "HTTP/1.1 $1\r\n"
+
     if [[ $HTTP_KEEP_ALIVE == 0 || $header[version] != "HTTP/1.1" ]]; then
         print -n "Connection: close\r\n"
     else
         print -n "Connection: ${header[connection]:-keep-alive}\r\n"
     fi
+
     print -n "Date: $(export TZ=UTC && strftime "%a, %d %b %Y %H:%M:%S" $EPOCHSECONDS) GMT\r\n"
     print -n "Server: czhttpd\r\n"
     for i in "$@[2,-1]"; do
@@ -338,9 +349,15 @@ function mime_type() {
             print "text/css";;
         (*)
             mtype=$(file --mime-type -bL $1)
-            [[ $mtype == *"no read permission" ]] && { print "application/octet-stream"; continue }
-            [[ ${mtype:h} == text ]] && { print "text/plain"; continue }
-            print "${mtype#application/x-executable}";;
+
+            case $mtype in
+                (*"no read permission")
+                    print "application/octet-stream";;
+                ("text/"*)
+                    print "text/plain";;
+                (*)
+                    print "${mtype#application/x-executable}";;
+            esac;;
     esac
 }
 
@@ -383,10 +400,12 @@ function list_dir() {
 }
 
 function send_list() {
-    list_dir $1 || return 1
-
-    return_header "200 Ok" "Transfer-Encoding: chunked" "Content-type: text/html; charset=UTF-8"
-    html_template $1 $dotdir $dotfiles $dir $files | send_chunk
+    if list_dir $1; then
+        return_header "200 Ok" "Transfer-Encoding: chunked" "Content-type: text/html; charset=UTF-8"
+        html_template $1 $dotdir $dotfiles $dir $files | send_chunk
+    else
+        return 1
+    fi
 }
 
 function send_file() {
@@ -416,13 +435,15 @@ function send_chunk() {
 }
 
 function check_if_cgi() {
-    [[ -z $CGI_EXTS_ARRAY ]] && return 1
+    if [[ -n $CGI_EXTS_ARRAY ]]; then
+        for i in $CGI_EXTS_ARRAY; [[ ${1##*.} == $i ]] && break
 
-    for i in $CGI_EXTS_ARRAY; [[ ${1##*.} == $i ]] && break
+        [[ $? != 0 || ! -x $1 ]] && return 1
 
-    [[ $? != 0 || ! -x $1 ]] && return 1
-
-    return 0
+        return 0
+    else
+        return 1
+    fi
 }
 
 function exec_cgi() {
@@ -580,29 +601,29 @@ while :; do
 
     fd=$REPLY
 
-    ztcp_sess=$(ztcp -L)
     while read line; do
         [[ $line[3] == "I" ]] && { client_ip=${line[(ws. .)3]}; break }
-    done <<< $ztcp_sess
+    done < <(ztcp -L)
 
     while :; do
-        unset header && typeset -A header
-        parse_request
-        [[ -z $header ]] && { logger_child "empty request, closing"; break }
-
-        check_request || continue
-
-        srv >&$fd 2>/dev/null
-
-        if [[ $HTTP_KEEP_ALIVE == 0 || $header[Connection] == "close" ]]; then
-            logger_child "connection type: close, closing"
+        if ! parse_request; then
+            logger_child "empty request, closing"
             break
+        fi
+
+        if check_request; then
+            srv 1>&$fd
+
+            if [[ $HTTP_KEEP_ALIVE == 0 || $header[Connection] == "close" ]]; then
+                logger_child "connection type: close, closing"
+                break
+            fi
         fi
     done
 
     ztcp -c
 
-    print "0" ) >&$fifofd &
+    print "0" >&$fifofd ) &
 
     ztcp -c $REPLY
 done
