@@ -217,7 +217,7 @@ function check_request() {
             continue;;
         (*)
             error_header 505
-            return;;
+            return 1;;
     esac
 
     case $header[method] in
@@ -400,12 +400,10 @@ function list_dir() {
 }
 
 function send_list() {
-    if list_dir $1; then
-        return_header "200 Ok" "Transfer-Encoding: chunked" "Content-type: text/html; charset=UTF-8"
-        html_template $1 $dotdir $dotfiles $dir $files | send_chunk
-    else
-        return 1
-    fi
+    list_dir $1 || return 1
+
+    return_header "200 Ok" "Transfer-Encoding: chunked" "Content-type: text/html; charset=UTF-8"
+    html_template $1 $dotdir $dotfiles $dir $files | send_chunk
 }
 
 function send_file() {
@@ -435,15 +433,13 @@ function send_chunk() {
 }
 
 function check_if_cgi() {
-    if [[ -n $CGI_EXTS_ARRAY ]]; then
-        for i in $CGI_EXTS_ARRAY; [[ ${1##*.} == $i ]] && break
+    [[ -z $CGI_EXTS_ARRAY ]] && return 1
 
-        [[ $? != 0 || ! -x $1 ]] && return 1
+    for i in $CGI_EXTS_ARRAY; [[ ${1##*.} == $i ]] && break
 
-        return 0
-    else
-        return 1
-    fi
+    [[ $? != 0 || ! -x $1 ]] && return 1
+
+    return 0
 }
 
 function exec_cgi() {
@@ -488,10 +484,7 @@ function exec_cgi() {
     return_header ${cgi_status_code:-"200 Ok"} "Transfer-Encoding: chunked" $cgi_head[@]
     send_chunk <&p
 
-    if ! wait $pid; then
-        logger_child "ERROR executing CGI script $1"
-        return 1
-    fi
+    wait $pid || { logger_child "ERROR executing CGI script $1"; return 1 }
 }
 
 function srv() {
@@ -606,10 +599,7 @@ while :; do
     done < <(ztcp -L)
 
     while :; do
-        if ! parse_request; then
-            logger_child "empty request, closing"
-            break
-        fi
+        parse_request || { logger_child "empty request, closing"; break }
 
         if check_request; then
             srv 1>&$fd
