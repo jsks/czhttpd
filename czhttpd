@@ -31,6 +31,7 @@ integer logfd
 integer fifofd
 
 typeset -a CGI_EXTS_ARRAY
+typeset -a GZIP_TYPES_ARRAY
 
 # Internal function variables that need global scope
 typeset -A header
@@ -103,6 +104,9 @@ File Options
     -s :    Allow czhttpd to follow symlinks
     -x :    Comma delimited list of file extensions to treat as
             CGI scripts
+    -z :    Enable gzip compression for text/{html,js,css}. An
+            optional comma delimited list of file mimetypes can
+            be specified for additional file types to compress.
 
 Output Options
     -l :    Enable logging to existing file
@@ -121,7 +125,13 @@ function parse_conf() {
         . $1 || error "Cannot source config file $1"
 
         (( $DISPLAY_HIDDEN_FILES )) && setopt GLOB_DOTS
-        [[ -n $CGI_EXTS ]] && { for k in ${(s.,.)CGI_EXTS}; CGI_EXTS_ARRAY+="${k##*.}" }
+
+        if [[ -n $CGI_EXTS ]]; then
+            for k in ${(s.,.)CGI_EXTS}; CGI_EXTS_ARRAY+="${k##*.}"
+        fi
+        if [[ $COMPRESSION == 1 && -n $COMPRESSED_TYPES ]]; then
+            for k in ${(s.,.)COMPRESSED_TYPES}; GZIP_TYPES_ARRAY+="$k"
+        fi
 
         if [[ ! -f $LOG_FILE ]]; then
             error "Log file $LOG_FILE does not exist."
@@ -132,7 +142,7 @@ function parse_conf() {
 }
 
 function parse_args() {
-    zparseopts -K -D -A OPTS C: i: l: m: p: t: x: a c h s v || error 2>/dev/null
+    zparseopts -K -D -A OPTS C: i: l: m: p: t: x: z:: a c h s v || error 2>/dev/null
 
     [[ -n $OPTS[-C] && ! -f $OPTS[-C] ]] && error "Config file $OPTS[-C] does not exist"
     parse_conf ${OPTS[-C]:-~/.config/czhttpd/czhttpd.conf}
@@ -171,6 +181,10 @@ function parse_args() {
             (-x)
                 unset CGI_EXTS_ARRAY && typeset -ga CGI_EXTS_ARRAY
                 for k in ${(s.,.)OPTS[$i]}; CGI_EXTS_ARRAY+="${k##*.}";;
+            (-z)
+                unset GZIP_TYPES_ARRAY && typeset -ga GZIP_TYPES_ARRAY
+                for k in ${(s.,.)OPTS[$i]}; GZIP_TYPES_ARRAY+="$k"
+                COMPRESSION=1;;
         esac
     done
 
@@ -399,20 +413,50 @@ function list_dir() {
     cd -
 }
 
-function send_list() {
-    list_dir $1 || return 1
+function check_if_compression() {
+    [[ -z $GZIP_TYPES_ARRAY ]] && return 1
+    [[ -z ${(SM)header[accept-encoding]#gzip} ]] && return 1
 
-    return_header "200 Ok" "Transfer-Encoding: chunked" "Content-type: text/html; charset=UTF-8"
-    html_template $1 $dotdir $dotfiles $dir $files | send_chunk
+    if [[ -f $1 ]]; then
+        for i in $GZIP_TYPES_ARRAY; [[ $mtype == $i ]] && break
+
+        if [[ $? != 0 ]] || (( $file_array[size] < $GZIP_MIN_SIZE )); then
+            return 1
+        fi
+    fi
+
+    return 0
 }
 
-function send_file() {
-    local -a array
+function send_list() {
+    local -a resp_headers
 
-    stat -H array $1
-    mimetype=$(mime_type $1)
+    list_dir $1 || return 1
 
-    return_header "200 Ok" "Content-type: $mimetype; charset=UTF-8" "Content-Length: $array[size]"
+    resp_headers=("200 Ok" "Content-type: text/html; charset=UTF-8" "Transfer-Encoding: chunked")
+
+    if check_if_compression; then
+        resp_headers+=("Content-Encoding: gzip")
+
+        return_header $resp_headers[@]
+        html_template $1 $dotdir $dotfiles $dir $files | gzip -$GZIP_LEVEL -c | send_chunk
+    else
+        return_header $resp_headers[@]
+        if [[ $header[method] != "HEAD" ]]; then
+            html_template $1 $dotdir $dotfiles $dir $files | send_chunk
+        fi
+    fi
+}
+
+function send_compressed_file() {
+    return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Encoding: gzip" "Transfer-Encoding: chunked"
+
+    gzip -$GZIP_LEVEL -c $1 | send_chunk
+}
+
+function send_raw_file() {
+    return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $file_array[size]"
+
     if [[ $header[method] != "HEAD" ]]; then
         <$1
     fi
@@ -422,6 +466,7 @@ function send_chunk() {
     if [[ $header[method] != "HEAD" ]]; then
         local buff
 
+        # Buffer output into 8K chunks using a pipe and sysread
         while sysread buff; do
             printf '%x\r\n' "$(print ${#buff})"
             printf '%s\r\n' "$buff"
@@ -487,25 +532,35 @@ function exec_cgi() {
     wait $pid || { logger_child "ERROR executing CGI script $1"; return 1 }
 }
 
+function handle_file() {
+    if check_if_cgi $1; then
+        exec_cgi $1
+    else
+        local -A file_array
+        stat -H file_array $1
+
+        local mtype
+        mtype=$(mime_type $1)
+
+        if check_if_compression $1; then
+            send_compressed_file $1
+        else
+            send_raw_file $1
+        fi
+    fi
+}
+
 function srv() {
     pathname="${DOCROOT}$(urldecode $header[url])"
     { if [[ -f $pathname ]]; then
         [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403; return }
 
-        if check_if_cgi $pathname; then
-            exec_cgi $pathname
-        else
-            send_file $pathname
-        fi
+        handle_file $pathname
     elif [[ -d $pathname ]]; then
         [[ $FOLLOW_SYMLINKS == 0 && -h ${pathname%/} ]] && { error_header 403; return }
 
         if [[ -f $pathname/$INDEX_FILE ]]; then
-            if check_if_cgi $INDEX_FILE; then
-                exec_cgi $pathname/$INDEX_FILE
-            else
-                send_file $pathname/$INDEX_FILE
-            fi
+            handle_file $pathname/$INDEX_FILE
         else
             if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
                 error_header 301 "http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
@@ -559,6 +614,10 @@ parse_args $*
 : ${CGI_TIMEOUT:=300}
 : ${FIFO:=/tmp/czhttpd.fifo}
 
+if [[ $COMPRESSION == 1 ]]; then
+    GZIP_TYPES_ARRAY+=("text/html" "text/css" "text/javascript")
+fi
+
 # Immutable Vars
 readonly SERVER_NAME="$(ip_addr)"
 readonly SERVER_ADDR="$SERVER_NAME"
@@ -572,6 +631,8 @@ logger "KEEP_ALIVE: $HTTP_KEEP_ALIVE"
 logger "TIMEOUT: $HTTP_TIMEOUT"
 logger "FOLLOW_SYMLINKS: $FOLLOW_SYMLINKS"
 logger "INDEX_FILE: $INDEX_FILE"
+logger "COMPRESSION: $COMPRESSION"
+logger "COMPRESSED_TYPES: $GZIP_TYPES_ARRAY"
 logger "CGI_EXTENSIONS: ${CGI_EXTS_ARRAY:-"N/A"}"
 logger "CGI_TIMEOUT: $CGI_TIMEOUT"
 logger "HIDDEN_FILES: $options[globdots]"
