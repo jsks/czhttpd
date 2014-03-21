@@ -1,7 +1,6 @@
 #!/usr/bin/zsh
 # zsh web server
 
-# Options
 # Clear env
 for z in ${(SM)$(export)#*=}; do
     case ${z%=} in
@@ -30,11 +29,54 @@ setopt posix_jobs
 integer logfd
 integer fifofd
 
-typeset -a CGI_EXTS_ARRAY
-typeset -a GZIP_TYPES_ARRAY
+# Mutable global variables
+typeset -A VARS
+VARS=( max_conn             "12"
+       port                 "8080"
+       http_keep_alive      "1"
+       http_timeout         "30"
+       follow_symlinks      "1"
+       index_file           "index.html"
+       compression          "0"
+       compression_types     "text/html,text/css,text/javascript"
+       compression_level    "6"
+       compression_min_size "1000"
+       cgi_extensions       ""
+       cgi_timeout          "300"
+       hidden_files         "0"
+       log_file             "/dev/null"
+       fifo_dir             "/tmp" )
+
+# Readonly vars, initialise later
+typeset -A RVARS
+
+# Mimetypes
+typeset -A MTYPES
+MTYPES=( pdf       application/pdf
+         gz        application/x-gzip
+         tar.gz    application/x-tgz
+         tgz       application/x-tgz
+         tar       application/x-tar
+         zip       application/zip
+         gif       image/gif
+         jpeg      image/jpeg
+         jpg       image/jpeg
+         png       image/png
+         css       text/css
+         html      text/html
+         htm       text/html
+         js        text/javascript
+         sh        text/plain
+         py        text/plain
+         pl        text/plain
+         log       text/plain
+         conf      text/plain
+         text      text/plain
+         txt       text/plain
+         default   application/octet-stream )
 
 # Internal function variables that need global scope
-typeset -A header
+typeset -A req_headers
 typeset -a dotdir dotfiles dir files
 typeset -a cgi_head cgi_body
 typeset cgi_status_code
@@ -44,8 +86,12 @@ function error() {
     print "Error: $*" >&2 >&$logfd
 
     exec {logfd}>&-
-    rm $FIFO 2>/dev/null
+    rm $RVARS[fifo] 2>/dev/null
     ztcp -c; exit 113
+}
+
+function warn() {
+    print "Warning: $*"
 }
 
 function logger() {
@@ -53,7 +99,7 @@ function logger() {
 }
 
 function logger_child() {
-    print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] [pid: $sysparams[pid]] (client $client_ip): $header[method] $header[url] $header[version] $*" >&$logfd
+    print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] [pid: $sysparams[pid]] (client $client_ip): $req_headers[method] $req_headers[url] $req_headers[version] $*" >&$logfd
 }
 
 function timeout() {
@@ -64,7 +110,7 @@ function timeout() {
     }
 
     $* &; pid1=$!
-    sleep $CGI_TIMEOUT &; pid2=$!
+    sleep $VARS[cgi_timeout] &; pid2=$!
 
     wait $pid1
     kill $pid2 2>/dev/null
@@ -76,7 +122,7 @@ function ip_addr() {
 
     tcp_list=("${(f@)$(</proc/net/tcp)}")
 
-    for i v in "${(s..)tcp_list[4][7,14]}"; do
+    for i v in "${(s..)tcp_list[-1][7,14]}"; do
         ip+="0x${(L)i}${(L)v}"
     done
 
@@ -121,70 +167,122 @@ exit
 }
 
 function parse_conf() {
+    local -i conf
+
     if [[ -f $1 ]]; then
-        . $1 || error "Cannot source config file $1"
+        exec {conf}<$1
 
-        (( $DISPLAY_HIDDEN_FILES )) && setopt GLOB_DOTS
+        while read -u $conf line; do
+            [[ $line[1] == "#" ]] && continue
 
-        if [[ -n $CGI_EXTS ]]; then
-            for k in ${(s.,.)CGI_EXTS}; CGI_EXTS_ARRAY+="${k##*.}"
-        fi
-        if [[ $COMPRESSION == 1 && -n $COMPRESSED_TYPES ]]; then
-            for k in ${(s.,.)COMPRESSED_TYPES}; GZIP_TYPES_ARRAY+="$k"
-        fi
+            if [[ $line[(ws. .)1] == "source" && -f $line[(ws. .)2] ]]; then
+                parse_conf $line[(ws. .)2]
+            else
+                for k v in ${(s.=.)line:gs/\"//}; do
+                    [[ $k =~ ${(kM)VARS:#$k}\|mime_type ]] || break
 
-        if [[ ! -f $LOG_FILE ]]; then
-            error "Log file $LOG_FILE does not exist."
-        elif [[ $LOG_FILE != "/dev/null" ]]; then
-            exec {logfd}>>$LOG_FILE
-        fi
+                    case $k in
+                        (max_conn|http_keep_alive|http_timeout|follow_symlinks|compression|compression_min_size|cgi_timeout|hidden_files)
+                            if [[ $v != <-> ]]; then
+                                warn "Error setting $k from config file, not a valid integer."
+                            else
+                                VARS[$k]=$v
+                            fi;;
+                        (index_file|cgi_extensions)
+                            VARS[$k]=$v;;
+                        (compression_types)
+                            VARS[$k]+=",$v";;
+                        (fifo_dir)
+                            if [[ -d $v ]]; then
+                                VARS[$k]=$v
+                            else
+                                warn "Error setting $k from config file, not a valid directory."
+                            fi;;
+                        (port)
+                            if [[ $v != <-> ]] || (( $v < 1024 )); then
+                                warn "Error setting $k from config file, not a valid port number."
+                            else
+                                VARS[$k]=$v
+                            fi;;
+                        (compression_level)
+                            if [[ $v != <-> ]] || (( $v > 9 || $v < 1 )); then
+                                warn "Error setting $k from config file, not a valid compression level."
+                            else
+                                VARS[$k]=$v
+                            fi;;
+                        (log_file)
+                            if [[ ! -f ${v:s/\~\//$HOME\//} ]]; then
+                                warn "Error setting $k from config file, not a valid log file."
+                            elif [[ $v != "/dev/null" ]]; then
+                                exec {logfd}>>${v:s/\~\//$HOME\//}
+                            fi;;
+                        (mime_types)
+                            unset MTYPES; typeset -gA MTYPES
+
+                            if [[ $v[1] == "(" ]]; then
+                                while :; do
+                                    for i j in ${(ws. .)line#*\(}; do
+                                        MTYPES[${i%\)*}]=${j%\)*}
+
+                                        [[ -n ${i[(r)\)]} || -n ${j[(r)\)]} ]] && break 2
+                                    done
+
+                                    read -u $conf line || break
+                                done
+                            fi;;
+                    esac
+                done
+            fi
+        done
     fi
+    exec {conf}>&-
 }
 
 function parse_args() {
-    zparseopts -K -D -A OPTS C: i: l: m: p: t: x: z:: a c h s v || error 2>/dev/null
+    local -A opts
 
-    [[ -n $OPTS[-C] && ! -f $OPTS[-C] ]] && error "Config file $OPTS[-C] does not exist"
-    parse_conf ${OPTS[-C]:-~/.config/czhttpd/czhttpd.conf}
+    zparseopts -K -D -A opts C: i: l: m: p: t: x: z:: a c h s v || error 2>/dev/null
 
-    [[ -n ${(kM)OPTS:#-h} ]] && help
-    [[ -n ${(k)OPTS[-l]} && -n ${(k)OPTS[-v]} ]] && error "Can not output to both stdout and logfile"
+    [[ -n $opts[-C] && ! -f $opts[-C] ]] && error "Config file $opts[-C] does not exist"
+    parse_conf ${opts[-C]:-~/.config/czhttpd/main.conf}
 
-    for i in ${(k)OPTS}; do
+    [[ -n ${(kM)opts:#-h} ]] && help
+    [[ -n ${(k)opts[-l]} && -n ${(k)opts[-v]} ]] && error "Can not output to both stdout and logfile"
+
+    for i in ${(k)opts}; do
         case $i in
             (-a)
+                VARS[hidden_files]=1
                 setopt GLOB_DOTS;;
             (-c)
-                HTTP_KEEP_ALIVE=0;;
+                VARS[http_keep_alive]=0;;
             (-i)
-                INDEX_FILE=$OPTS[$i];;
+                VARS[index_file]=$opts[$i];;
             (-l)
-                [[ ! -f $OPTS[$i] ]] && error "File $OPTS[$i] does not exist"
-                exec {logfd}>>$OPTS[$i];;
+                [[ ! -f $opts[$i] ]] && error "File $opts[$i] does not exist"
+                exec {logfd}>>$opts[$i];;
             (-m)
-                [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i] is not a valid integer"
-                MAX_CONNECTIONS=$OPTS[$1];;
+                [[ $opts[$i] != <-> ]] && error "$opts[$i] is not a valid integer"
+                VARS[max_conn]=$opts[$i];;
             (-p)
-                if [[ $OPTS[$i] != <-> ]]; then
-                    error "$OPTS[$i] is not a valid integer"
+                if [[ $opts[$i] != <-> ]]; then
+                    error "$opts[$i] is not a valid integer"
                 else
-                    (( $OPTS[$i] < 1024 )) && error "$OPTS[$i] is not a valid port number"
+                    (( $opts[$i] < 1024 )) && error "$opts[$i] is not a valid port number"
                 fi
-                PORT=$OPTS[$i];;
+                VARS[port]=$opts[$i];;
             (-s)
-                FOLLOW_SYMLINKS=1;;
+                VARS[follow_symlinks]=1;;
             (-t)
-                [[ $OPTS[$i] != <-> ]] && error "$OPTS[$i] is not a valid integer"
-                HTTP_TIMEOUT=$OPTS[$i];;
+                [[ $opts[$i] != <-> ]] && error "$opts[$i] is not a valid integer"
+                VARS[http_timeout]=$opts[$i];;
             (-v)
                 exec {logfd}>&1 2>/dev/null;;
             (-x)
-                unset CGI_EXTS_ARRAY && typeset -ga CGI_EXTS_ARRAY
-                for k in ${(s.,.)OPTS[$i]}; CGI_EXTS_ARRAY+="${k##*.}";;
+                VARS[cgi_extensions]+="$opts[$i]";;
             (-z)
-                unset GZIP_TYPES_ARRAY && typeset -ga GZIP_TYPES_ARRAY
-                for k in ${(s.,.)OPTS[$i]}; GZIP_TYPES_ARRAY+="$k"
-                COMPRESSION=1;;
+                VARS[compression_types]+=",$opts[$i]"
+                VARS[compression]=1;;
         esac
     done
 
@@ -192,41 +290,43 @@ function parse_args() {
 
     if [[ -n $1 ]]; then
         [[ -e $1 ]] || error "$1 is not a valid directory or file."
-        DOCROOT="$1"
+        RVARS[docroot]="$1"
     else
-        DOCROOT="$PWD"
+        RVARS[docroot]="$PWD"
     fi
 }
 
 function http_listen() {
-    ztcp -l $PORT 2>/dev/null || error "Could not bind to port $PORT"
-    print "Listening on $PORT"
+    typeset -g listenfd
+
+    ztcp -l $VARS[port] 2>/dev/null || error "Could not bind to port $VARS[port]"
+    print "Listening on $VARS[port]"
     listenfd=$REPLY
 }
 
 function parse_request() {
-    unset header; typeset -gA header
+    unset req_headers; typeset -gA req_headers
 
-    read -t $HTTP_TIMEOUT -r -u $fd line || return 1
+    read -t $VARS[http_timeout]  -r -u $fd line || return 1
     for method url version in ${(s. .)line%$'\r'}; do
-        header[method]="$method"
-        header[url]="${url%\?*}"
-        header[querystr]="${(M)url%\?*}"
-        header[version]="$version"
+        req_headers[method]="$method"
+        req_headers[url]="${url%\?*}"
+        req_headers[querystr]="${(M)url%\?*}"
+        req_headers[version]="$version"
     done
 
-    while read -t $HTTP_TIMEOUT -r -u $fd line; do
+    while read -t $VARS[http_timeout] -r -u $fd line; do
         [[ -n $line && $line != $'\r' ]] || break
         for key value in ${(s/: /)line%$'\r'}; do
-            header[${(L)key}]="$value"
+            req_headers[${(L)key}]="$value"
         done
     done
 }
 
 function check_request() {
-    case $header[version] in
+    case $req_headers[version] in
         ("HTTP/1.1")
-            [[ -z $header[host] ]] && { error_header 400; return 1 };;
+            [[ -z $req_headers[host] ]] && { error_header 400; return 1 };;
         ("HTTP/1.0")
             continue;;
         (*)
@@ -234,7 +334,7 @@ function check_request() {
             return 1;;
     esac
 
-    case $header[method] in
+    case $req_headers[method] in
         ("HEAD"|"GET"|"POST")
             return 0;;
         (*)
@@ -246,10 +346,10 @@ function check_request() {
 function return_header() {
     print -n "HTTP/1.1 $1\r\n"
 
-    if [[ $HTTP_KEEP_ALIVE == 0 || $header[version] != "HTTP/1.1" ]]; then
+    if [[ $VARS[http_keep_alive] == 0 || $req_headers[version] != "HTTP/1.1" ]]; then
         print -n "Connection: close\r\n"
     else
-        print -n "Connection: ${header[connection]:-keep-alive}\r\n"
+        print -n "Connection: ${req_headers[connection]:-keep-alive}\r\n"
     fi
 
     print -n "Date: $(export TZ=UTC && strftime "%a, %d %b %Y %H:%M:%S" $EPOCHSECONDS) GMT\r\n"
@@ -322,7 +422,7 @@ div.footer { font: 90% monospace; color: grey; font-style: italic; padding-left:
         </tbody>
     </table>
 </div>
-<div class=footer>$SERVER_SOFTWARE</div>
+<div class=footer>$RVARS[server_software]</div>
 </body>
 </html>
 EOF
@@ -356,12 +456,11 @@ function urldecode() {
 function mime_type() {
     [[ -d "$1" ]] && { print "Directory"; return }
 
-    case $1 in
-        (*.html)
-            print "text/html";;
-        (*.css)
-            print "text/css";;
-        (*)
+    local file_tail="${1:t}"
+    if [[ -n $MTYPES[${file_tail#*.}] ]]; then
+        print $MTYPES[${file_tail#*.}]
+    else
+        if which file >/dev/null; then
             mtype=$(file --mime-type -bL $1)
 
             case $mtype in
@@ -371,8 +470,11 @@ function mime_type() {
                     print "text/plain";;
                 (*)
                     print "${mtype#application/x-executable}";;
-            esac;;
-    esac
+            esac
+        else
+            print $MTYPES[default]
+        fi
+    fi
 }
 
 function calc_size() {
@@ -396,7 +498,7 @@ function list_dir() {
 
     cd "$1" || return 1
 
-    [[ "${1%/}" != "${DOCROOT%/}" ]] && dotdir+="$(html_fragment '/../')"
+    [[ "${1%/}" != "${RVARS[docroot]%/}" ]] && dotdir+="$(html_fragment '/../')"
 
     for i in ./*(Nr); do
         if [[ $i == ./.* ]]; then
@@ -414,13 +516,13 @@ function list_dir() {
 }
 
 function check_if_compression() {
-    [[ -z $GZIP_TYPES_ARRAY ]] && return 1
-    [[ -z ${(SM)header[accept-encoding]#gzip} ]] && return 1
+    [[ $VARS[compression] == 0 ]] && return 1
+    [[ -z ${(SM)req_headers[accept-encoding]#gzip} ]] && return 1
 
     if [[ -f $1 ]]; then
-        for i in $GZIP_TYPES_ARRAY; [[ $mtype == $i ]] && break
+        for i in ${(s.,.)VARS[compression_types]}; [[ $mtype == $i ]] && break
 
-        if [[ $? != 0 ]] || (( $file_array[size] < $GZIP_MIN_SIZE )); then
+        if [[ $? != 0 ]] || (( $file_array[size] < $VARS[compression_min_size] )); then
             return 1
         fi
     fi
@@ -439,10 +541,12 @@ function send_list() {
         resp_headers+=("Content-Encoding: gzip")
 
         return_header $resp_headers[@]
-        html_template $1 $dotdir $dotfiles $dir $files | gzip -$GZIP_LEVEL -c | send_chunk
+        if [[ $req_headers[method] != "HEAD" ]]; then
+            html_template $1 $dotdir $dotfiles $dir $files | gzip -$GZIP_LEVEL -c | send_chunk
+        fi
     else
         return_header $resp_headers[@]
-        if [[ $header[method] != "HEAD" ]]; then
+        if [[ $req_headers[method] != "HEAD" ]]; then
             html_template $1 $dotdir $dotfiles $dir $files | send_chunk
         fi
     fi
@@ -451,19 +555,19 @@ function send_list() {
 function send_compressed_file() {
     return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Encoding: gzip" "Transfer-Encoding: chunked"
 
-    gzip -$GZIP_LEVEL -c $1 | send_chunk
+    gzip -$VARS[compression_level] -c $1 | send_chunk
 }
 
 function send_raw_file() {
     return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $file_array[size]"
 
-    if [[ $header[method] != "HEAD" ]]; then
+    if [[ $req_headers[method] != "HEAD" ]]; then
         <$1
     fi
 }
 
 function send_chunk() {
-    if [[ $header[method] != "HEAD" ]]; then
+    if [[ $req_headers[method] != "HEAD" ]]; then
         local buff
 
         # Buffer output into 8K chunks using a pipe and sysread
@@ -478,9 +582,9 @@ function send_chunk() {
 }
 
 function check_if_cgi() {
-    [[ -z $CGI_EXTS_ARRAY ]] && return 1
+    [[ -z $VARS[cgi_extensions] ]] && return 1
 
-    for i in $CGI_EXTS_ARRAY; [[ ${1##*.} == $i ]] && break
+    for i in ${(s.,.)VARS[cgi_extensions]}; [[ ${1##*.} == $i ]] && break
 
     [[ $? != 0 || ! -x $1 ]] && return 1
 
@@ -494,18 +598,18 @@ function exec_cgi() {
 
     local cmd pid
 
-    local -x CONTENT_LENGTH="${header[content-length]:-NULL}" CONTENT_TYPE="$header[content-type]" GATEWAY_INTERFACE="$GATEWAY_INTERFACE" QUERY_STRING="${header[querystr]#\?}" REMOTE_ADDR="$client_ip" REMOTE_HOST="NULL" REQUEST_METHOD="$header[method]" SCRIPT_NAME="${1#$DOCROOT}" SERVER_NAME="$SERVER_NAME" SERVER_ADDR="$SERVER_ADDR" SERVER_PORT="$PORT" SERVER_PROTOCOL="$SERVER_PROTOCOL" SERVER_SOFTWARE="$SERVER_SOFTWARE"
+    local -x CONTENT_LENGTH="${req_headers[content-length]:-NULL}" CONTENT_TYPE="$req_headers[content-type]" GATEWAY_INTERFACE="$RVARS[gateway_interface]" QUERY_STRING="${req_headers[querystr]#\?}" REMOTE_ADDR="$client_ip" REMOTE_HOST="NULL" REQUEST_METHOD="$req_headers[method]" SCRIPT_NAME="${1#$RVARS[docroot]}" SERVER_NAME="$RVARS[server_name]" SERVER_ADDR="$RVARS[server_addr]" SERVER_PORT="$VARS[port]" SERVER_PROTOCOL="$RVARS[server_protocol]" SERVER_SOFTWARE="$RVARS[server_software]"
 
-    local -x DOCUMENT_ROOT="$DOCROOT" REQUEST_URI="$header[url]$header[querystr]" SCRIPT_FILENAME="$1" REDIRECT_STATUS=1
+    local -x DOCUMENT_ROOT="$RVARS[docroot]" REQUEST_URI="$req_headers[url]$req_headers[querystr]" SCRIPT_FILENAME="$1" REDIRECT_STATUS=1
 
-    for i in ${(k)header}; do
+    for i in ${(k)req_headers}; do
         case $i in
             ("connection"|"content-length"|"content-type"|"querystr")
                 continue;;
             ("method"|"version"|"url")
                 continue;;
             (*)
-                local -x HTTP_${(U)i:gs/\-/\_}="$header[$i]";;
+                local -x HTTP_${(U)i:gs/\-/\_}="$req_headers[$i]";;
         esac
     done
 
@@ -529,7 +633,10 @@ function exec_cgi() {
     return_header ${cgi_status_code:-"200 Ok"} "Transfer-Encoding: chunked" $cgi_head[@]
     send_chunk <&p
 
-    wait $pid || { logger_child "ERROR executing CGI script $1"; return 1 }
+    if ! wait $pid; then
+        logger_child "ERROR executing CGI script $1"
+        return_header 500
+    fi
 }
 
 function handle_file() {
@@ -551,19 +658,19 @@ function handle_file() {
 }
 
 function srv() {
-    pathname="${DOCROOT}$(urldecode $header[url])"
-    { if [[ -f $pathname ]]; then
+    pathname="${RVARS[docroot]}$(urldecode $req_headers[url])"
+    if [[ -f $pathname ]]; then
         [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403; return }
 
         handle_file $pathname
     elif [[ -d $pathname ]]; then
-        [[ $FOLLOW_SYMLINKS == 0 && -h ${pathname%/} ]] && { error_header 403; return }
+        [[ $VARS[follow_symlinks] == 0 && -h ${pathname%/} ]] && { error_header 403; return }
 
-        if [[ -f $pathname/$INDEX_FILE ]]; then
-            handle_file $pathname/$INDEX_FILE
+        if [[ -f $pathname/$VARS[index_file] ]]; then
+            handle_file $pathname/$VARS[index_file]
         else
-            if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
-                error_header 301 "http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
+            if [[ $pathname != $RVARS[docroot] && $pathname[-1] != "/" ]]; then
+                error_header 301 "http://$RVARS[server_addr]:$VARS[port]${pathname#$RVARS[docroot]}/"
                 return
             else
                 send_list "$pathname" || { error_header 403; return }
@@ -572,7 +679,7 @@ function srv() {
     else
         error_header 404
         return
-    fi } || { error_header 500; return }
+    fi
 
     logger_child "200"
 }
@@ -584,7 +691,7 @@ function cleanup() {
 
     logger "> Exiting main"
     exec {logfd}>&-; exec {fifofd}>&-
-    rm $FIFO; ztcp -c
+    rm $RVARS[fifo]; ztcp -c
 }
 
 function TRAPCHLD() {
@@ -603,48 +710,29 @@ exec {logfd}>/dev/null
 # Parse cli options and config file
 parse_args $*
 
-# Set defaults
-: ${MAX_CONNECTIONS:=12}
-: ${PORT:=8080}
-: ${HTTP_KEEP_ALIVE:=1}
-: ${HTTP_TIMEOUT:=30}
-: ${FOLLOW_SYMLINKS:=0}
-: ${INDEX_FILE:=index.html}
-: ${CGI_EXTS_ARRAY:=""}
-: ${CGI_TIMEOUT:=300}
-: ${FIFO:=/tmp/czhttpd.fifo}
-
-if [[ $COMPRESSION == 1 ]]; then
-    GZIP_TYPES_ARRAY+=("text/html" "text/css" "text/javascript")
-fi
 
 # Immutable Vars
-readonly SERVER_NAME="$(ip_addr)"
-readonly SERVER_ADDR="$SERVER_NAME"
-readonly SERVER_SOFTWARE="czhttpd/1.2b"
-readonly SERVER_PROTOCOL="HTTP/1.1"
-readonly GATEWAY_INTERFACE="CGI/1.1"
+RVARS[fifo]=$VARS[fifo_dir]/czhttpd-$$.fifo
+RVARS[server_name]="$(ip_addr)"
+RVARS[server_addr]="$RVARS[server_name]"
+RVARS[server_software]="czhttpd/1.2b"
+RVARS[server_protocol]="HTTP/1.1"
+RVARS[gateway_interface]="CGI/1.1"
 
-logger "MAX_CONNECTIONS: $MAX_CONNECTIONS"
-logger "PORT: $PORT"
-logger "KEEP_ALIVE: $HTTP_KEEP_ALIVE"
-logger "TIMEOUT: $HTTP_TIMEOUT"
-logger "FOLLOW_SYMLINKS: $FOLLOW_SYMLINKS"
-logger "INDEX_FILE: $INDEX_FILE"
-logger "COMPRESSION: $COMPRESSION"
-logger "COMPRESSED_TYPES: $GZIP_TYPES_ARRAY"
-logger "CGI_EXTENSIONS: ${CGI_EXTS_ARRAY:-"N/A"}"
-logger "CGI_TIMEOUT: $CGI_TIMEOUT"
-logger "HIDDEN_FILES: $options[globdots]"
+readonly RVARS
+
+for i in ${(Ok)VARS}; do
+    logger "$i: $VARS[$i]"
+done
 
 http_listen
 
-mkfifo $FIFO 2>/dev/null || error "Can not create $FIFO"
-exec {fifofd}<>$FIFO
+mkfifo $RVARS[fifo] 2>/dev/null || error "Can not create $RVARS[fifo]"
+exec {fifofd}<>$RVARS[fifo]
 
 while :; do
     # Use select to block until a child writes to fifo on exit
-    while (( ${#jobstates} >= $MAX_CONNECTIONS )); do
+    while (( ${#jobstates} >= $VARS[max_conn] )); do
         logger "max connections hit, temporarily unable to fork"
         zselect -r $fifofd && break
     done
@@ -663,9 +751,9 @@ while :; do
         parse_request || { logger_child "empty request, closing"; break }
 
         if check_request; then
-            srv 1>&$fd
+            srv >&$fd 2>/dev/null || { logger_child "broken socket, closing"; break }
 
-            if [[ $HTTP_KEEP_ALIVE == 0 || $header[Connection] == "close" ]]; then
+            if [[ $VARS[http_keep_alive] == 0 || $req_headers[connection] == "close" ]]; then
                 logger_child "connection type: close, closing"
                 break
             fi
