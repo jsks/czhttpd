@@ -175,11 +175,11 @@ function parse_conf() {
         while read -u $conf line; do
             [[ $line[1] == "#" ]] && continue
 
-            if [[ $line[(ws. .)1] == "source" && -f $line[(ws. .)2] ]]; then
-                parse_conf $line[(ws. .)2]
+            if [[ $line[(ws. .)1] == "source" && -f ${line[(ws. .)2]:s/\~/$HOME/} ]]; then
+                parse_conf ${line[(ws. .)2]:s/\~/$HOME/}
             else
                 for k v in ${(s.=.)line:gs/\"//}; do
-                    [[ $k =~ "${(kM)VARS:#$k}"\|"mime_types" ]] || break
+                    [[ $k == ${(kM)VARS:#$k} || $k == "mime_types" ]] || break
 
                     case $k in
                         (max_conn|http_keep_alive|http_timeout|follow_symlinks|compression|compression_min_size|cgi_timeout|hidden_files)
