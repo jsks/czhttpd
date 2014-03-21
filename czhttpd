@@ -179,7 +179,7 @@ function parse_conf() {
                 parse_conf $line[(ws. .)2]
             else
                 for k v in ${(s.=.)line:gs/\"//}; do
-                    [[ $k =~ ${(kM)VARS:#$k}\|mime_type ]] || break
+                    [[ $k =~ "${(kM)VARS:#$k}"\|"mime_types" ]] || break
 
                     case $k in
                         (max_conn|http_keep_alive|http_timeout|follow_symlinks|compression|compression_min_size|cgi_timeout|hidden_files)
@@ -472,7 +472,7 @@ function mime_type() {
                     print "${mtype#application/x-executable}";;
             esac
         else
-            print $MTYPES[default]
+            print ${MTYPES[default]:-application/octet-stream}
         fi
     fi
 }
