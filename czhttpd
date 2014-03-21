@@ -247,8 +247,8 @@ function parse_conf() {
                 done
             fi
         done
+        exec {conf}>&-
     fi
-    exec {conf}>&-
 }
 
 function parse_args() {
