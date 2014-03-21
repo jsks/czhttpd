@@ -122,8 +122,14 @@ function ip_addr() {
 
     tcp_list=("${(f@)$(</proc/net/tcp)}")
 
-    for i v in "${(s..)tcp_list[-1][7,14]}"; do
-        ip+="0x${(L)i}${(L)v}"
+    for i in $tcp_list[2,-1]; do
+        if [[ $i[7,14] != 00000000 && $i[7,14] != 0100007F ]]; then
+            for k v in "${(s..)i[7,14]}"; do
+                ip+="0x${(L)k}${(L)v}"
+            done
+
+            break
+        fi
     done
 
     printf "%d.%d.%d.%d\n" ${(Oa)ip[@]}
@@ -182,7 +188,7 @@ function parse_conf() {
                     [[ $k == ${(kM)VARS:#$k} || $k == "mime_types" ]] || break
 
                     case $k in
-                        (max_conn|http_keep_alive|http_timeout|follow_symlinks|compression|compression_min_size|cgi_timeout|hidden_files)
+                        (max_conn|http_keep_alive|http_timeout|follow_symlinks|compression|compression_min_size|cgi_timeout)
                             if [[ $v != <-> ]]; then
                                 warn "Error setting $k from config file, not a valid integer."
                             else
@@ -190,6 +196,13 @@ function parse_conf() {
                             fi;;
                         (index_file|cgi_extensions)
                             VARS[$k]=$v;;
+                        (hidden_files)
+                            if [[ $v != <-> ]]; then
+                                warn "Error setting $k from config file, not a valid integer."
+                            else
+                                VARS[$k]=$v
+                            fi
+                            [[ $VARS[$k] == 1 ]] && setopt GLOB_DOTS;;
                         (compression_types)
                             VARS[$k]+=",$v";;
                         (fifo_dir)
