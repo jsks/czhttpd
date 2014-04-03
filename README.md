@@ -29,7 +29,7 @@ The primary goal of this project was to write a web server using pure zsh. There
 ```
 czhttpd [OPTIONS] <file or dir>
 - Options
-    -c :    Configuration file (default: ~/.config/czhttpd/czhttpd.conf)
+    -c :    Configuration file (default: ~/.config/czhttpd/conf/main.conf)
     -h :    Print useless help message
     -v :    Redirect logging to stdout
 
