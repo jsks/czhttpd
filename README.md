@@ -17,9 +17,10 @@ The primary goal of this project was to write a web server using pure zsh. There
 - Dynamic directory listing
 - UTF-8 support
 - Multiple concurrent connections
-- Gzip compression
-- Basic CGI/1.1 support
-    - phpMyAdmin appears fully functional, and partially Wordpress (requires configuring for an alternative port)
+- Module support for:
+    - Gzip compression
+    - Basic CGI/1.1 support
+        - phpMyAdmin appears fully functional, and partially Wordpress (requires configuring for an alternative port)
 
 ### Optional Dependency:
 - `file`
@@ -27,52 +28,18 @@ The primary goal of this project was to write a web server using pure zsh. There
 ### Usage:
 ```
 czhttpd [OPTIONS] <file or dir>
-- Configuration Options
-    -C :    Configuration file (default: ~/.config/czhttpd/czhttpd.conf)
-
-- Connection Options
-    -c :    Disable http keep-alive and force 'connection: close' for all 
-            HTTP/1.1 response headers
-    -m :    Max number of connections to accept (default: 12)
-    -p :    Port to bind to (default: 8080)
-    -t :    Connection timeout in seconds (default: 30)
-
-- File Options
-    -a :    Display hidden files in directories
-    -i :    Specify index file (default: index.html)
-    -s :    Allow czhttpd to follow symlinks
-    -x :    Comma delimited list of file extensions to treat as CGI scripts
-    -z :    Enable gzip compression for text/{html,js,css}. An optional comma delimited list of file
-            mimetypes can be specified for additional files types to compress.
-
-- Output Options
-    -l :    Enable logging to existing file (default: /dev/null)
-    -v :    Enable verbose output to stdout
-    -h :    Print help message
+- Options
+    -c :    Configuration file (default: ~/.config/czhttpd/czhttpd.conf)
+    -h :    Print useless help message
+    -v :    Redirect logging to stdout
 
 If no file or directory is given, czhttpd defaults to serving the current directory
 ```
 
 ### Configuration:
-czhttpd supports an optional configuration file as a matter of convenience. The provided sample main.conf lists the variables that can be overriden. Any additional files can be sourced in the primary configuration file.
+The provided sample main.conf lists the variables that can be changed. Any additional files or modules can be sourced using the standard shell command, `source`. Currently, there are only two modules, cgi.sh and compress.sh, there description and use should be listed in the respective cgi.conf and compress.conf config files.
 
-By default, czhttpd searches for main.conf in `~/.config/czhttpd`. An alternative config file can be specified with the commandline option `-C`.
-
-### Examples:
-- Start czhttpd on port 8000 with logging, compression, and hidden files enabled<br>
-```
-./czhttpd -p 8000 -a -l -z ~/.config/czhttpd/czhttpd.log
-```
-
-- Run with CGI enabled for php, python, and perl<br>
-```
-./czhttpd -x php,py,pl
-```
-
-- Serve an instance of phpMyAdmin installed in ~/ with logging sent to stdout<br>
-```
-./czhttpd -v -x php -i index.php ~/phpmyadmin
-```
+By default, czhttpd searches for main.conf in `~/.config/czhttpd/conf/`. An alternative config file can be specified with the commandline option `-c`.
 
 ---
 
