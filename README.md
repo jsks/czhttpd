@@ -29,7 +29,7 @@ The primary goal of this project was to write a web server using pure zsh. There
 ```
 czhttpd [OPTIONS] <file or dir>
 - Options
-    -c :    Configuration file (default: ~/.config/czhttpd/czhttpd.conf)
+    -c :    Configuration file (default: ~/.config/czhttpd/conf/main.conf)
     -h :    Print useless help message
     -v :    Redirect logging to stdout
 
@@ -37,7 +37,7 @@ If no file or directory is given, czhttpd defaults to serving the current direct
 ```
 
 ### Configuration:
-The provided sample main.conf lists the variables that can be changed. Any additional files or modules can be sourced using the standard shell command, `source`. Currently, there are only two modules, cgi.sh and compress.sh, there description and use should be listed in the respective cgi.conf and compress.conf config files.
+The provided sample main.conf lists the variables that can be changed. Any additional files or modules can be sourced using the standard shell command, `source`. Currently, there are only two modules, cgi.sh and compress.sh. Their description and use should be listed in the respective cgi.conf and compress.conf config files.
 
 By default, czhttpd searches for main.conf in `~/.config/czhttpd/conf/`. An alternative config file can be specified with the commandline option `-c`.
 
