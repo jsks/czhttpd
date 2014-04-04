@@ -1,3 +1,5 @@
+# Module to handle cgi scripts
+
 # Declare our default variables
 : ${CGI_ENABLE:=1}
 : ${CGI_EXTS:="php"}
@@ -57,14 +59,8 @@ function exec_cgi() {
         cgi_head+=${line%$'\r'}
     done
 
-    if ! wait $pid; then
-        log_f "Error executing CGI script $1"
-        return_header 500
-        return
-    fi
-
     if [[ -z ${(M)${cgi_head:l}:#content-type*} ]]; then
-        log_f "ERROR CGI script $1 failed to return MIME-type"
+        log_err "cgi script $1 failed to return a mime-type"
         return_header 500
         return
     fi
@@ -72,4 +68,10 @@ function exec_cgi() {
     log_f ${cgi_status_code:-"200"}
     return_header ${cgi_status_code:-"200 Ok"} "Transfer-Encoding: chunked" $cgi_head[@]
     send_chunk <&p
+
+    if ! wait $pid; then
+        log_err "executing cgi script $1 failed"
+        return_header 500
+        return
+    fi
 }

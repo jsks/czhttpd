@@ -1,3 +1,5 @@
+# Module to compress server output using gzip
+
 # Declare our module defaults
 : ${COMPRESS:=1}
 : ${COMPRESS_TYPES:="text/html,text/css,text/javascript"}
@@ -5,7 +7,7 @@
 : ${COMPRESS_MIN_SIZE:=1000}
 
 function compression_filter() {
-    if check_if_compression; then
+    if check_if_compression $1; then
         return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Encoding: gzip" "Transfer-Encoding: chunked"
         if [[ $req_headers[method] != "HEAD" ]]; then
             if [[ -n $1 ]]; then
@@ -14,6 +16,8 @@ function compression_filter() {
                 gzip -$COMPRESS_LEVEL -c | send_chunk
             fi
         fi
+    else
+        return 1
     fi
 }
 

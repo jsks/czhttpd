@@ -124,14 +124,21 @@ function parse_conf() {
 
 function parse_args() {
     local -A opts
-    zparseopts -K -D -A opts c: h v || error 2>/dev/null
+    zparseopts -K -D -A opts c: p: h v || error 2>/dev/null
 
     [[ -n ${(kM)opts:#-h} ]] && help
 
     [[ -n $opts[-c] && ! -f $opts[-c] ]] && error "Config file $opts[-c] does not exist"
     parse_conf ${opts[-c]:-~/.config/czhttpd/conf/main.conf}
 
-    [[ -n ${(kM)opts:#-v} ]] && { exec {errfd}>&1; exec {logfd}>&1 }
+    for i in ${(k)opts}; do
+        case $i in
+            ("-v")
+                exec {errfd}>&1; exec {logfd}>&1;;
+            ("-p")
+                PORT=$opts[$i];;
+        esac
+    done
 
     log_f "> Initializing czhttpd"
 
@@ -403,11 +410,11 @@ function default_handler() {
     local mtype
     mtype=$(mime_type $1)
 
+    stat -H file_array $1
+
     # Find a filter, e.g. to compress output, if not send raw file
     if ! filter_search $1; then
-        stat -H file_array $1
         return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $file_array[size]"
-        log_f "200"
         send_file $1
     fi
 
@@ -415,7 +422,7 @@ function default_handler() {
 }
 
 function filter_search() {
-    for i in ${(Mk)functions#*_filter}; { $i $1; return }
+    for i in ${(Mk)functions#*_filter}; { $i $1 && return }
 
     return 1
 }
@@ -423,8 +430,7 @@ function filter_search() {
 function handler_search() {
     for i in ${(Mk)functions#*_handler}; do
         if [[ $i != "default_handler" ]]; then
-            $i $1
-            return
+            $i $1 && return
         fi
     done
 
