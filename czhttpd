@@ -74,6 +74,7 @@ function timeout() {
 function ip_addr() {
     local -a tcp_list
     local -a ip
+    local i k v
 
     tcp_list=("${(f@)$(</proc/net/tcp)}")
 
@@ -97,7 +98,7 @@ Usage: czhttpd [OPTIONS] <file or dir>
 czhttpd - cloud's zsh http server
 
 Options
-    -c :    Config file location (default: ~/.config/czhttpd/czhttpd.conf)
+    -c :    Config file location (default: ~/.config/czhttpd/main.conf)
     -h :    Print this help message
     -v :    Redirect log messages to stdout
 
@@ -115,7 +116,12 @@ function parse_conf() {
 
     (( $hidden_files )) && setopt GLOB_DOTS
 
-    [[ -d $LOG_DIR ]] && { exec {errfd}>>$LOG_DIR/error.log; exec {logfd}>>$LOG_DIR/access.log }
+    if [[ -d $LOG_DIR ]]; then
+        exec {errfd}>>$LOG_DIR/error.log
+        exec {logfd}>>$LOG_DIR/access.log
+    else
+        print "Invalid log directory $LOG_DIR"
+    fi
 
     [[ -n $MAX_CONN && $MAX_CONN != <-> ]] && error "Invalid integer for MAX_CONN in conf file $1"
 
@@ -124,6 +130,8 @@ function parse_conf() {
 
 function parse_args() {
     local -A opts
+    local i
+
     zparseopts -K -D -A opts c: p: h v || error 2>/dev/null
 
     [[ -n ${(kM)opts:#-h} ]] && help
@@ -153,7 +161,7 @@ function parse_args() {
 function http_listen() {
     typeset -g listenfd
 
-    if [[ $PORT == <-> ]] || (( $PORT > 1024 )); then
+    if (( $PORT > 1024 )); then
         ztcp -l $PORT 2>/dev/null || error "Could not bind to port $PORT"
         print "Listening on $PORT"
         listenfd=$REPLY
@@ -164,6 +172,7 @@ function http_listen() {
 
 function parse_request() {
     unset req_headers; typeset -gA req_headers
+    local method url querystr version key value line
 
     read -t $HTTP_TIMEOUT -r -u $fd line || return 1
     for method url version in ${(s. .)line%$'\r'}; do
@@ -200,9 +209,11 @@ function check_request() {
 }
 
 function return_header() {
+    local i
+
     print -n "HTTP/1.1 $1\r\n"
 
-    if [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[version] != "HTTP/1.1" ]]; then
+    if [[ $HTTP_KEEP_ALIVE == 0 ]]; then
         print -n "Connection: close\r\n"
     else
         print -n "Connection: ${req_headers[connection]:-keep-alive}\r\n"
@@ -255,19 +266,6 @@ function html_fragment() {
 EOF
 }
 
-function urlencode() {
-    for i in ${(s::)1}; do
-        case "$i" in
-            ([-._~A-Za-z0-9])
-                printf '%s' "$i";;
-            (*)
-                printf '%%%02x' "'$i";;
-        esac
-    done
-
-    printf '\n'
-}
-
 function urldecode() {
     printf '%b\n' "${1:gs/%/\\x}"
 }
@@ -314,6 +312,7 @@ function calc_size() {
 function list_dir() {
     unset dir dotdir files dotfiles
     typeset -ga dir dotdir files dotfiles
+    local i
 
     cd "$1" || return 1
 
@@ -385,12 +384,16 @@ function default_handler() {
 }
 
 function filter_search() {
+    local i
+
     for i in ${(Mk)functions#*_filter}; { $i $1 && return }
 
     return 1
 }
 
 function handler_search() {
+    local i
+
     for i in ${(Mk)functions#*_handler}; do
         if [[ $i != "default_handler" ]]; then
             $i $1 && return
@@ -508,7 +511,7 @@ fi
 http_listen
 
 FIFO=$FIFO_DIR/czhttpd-$$.fifo
-mkfifo $FIFO 2>/dev/null || error "Can not create fifo in $FIFO"
+mkfifo $FIFO 2>/dev/null || error "Can not create fifo, $FIFO"
 exec {fifofd}<>$FIFO
 
 while :; do
@@ -529,9 +532,7 @@ while :; do
     done < <(ztcp -L)
 
     while :; do
-        parse_request || break
-
-        if check_request; then
+        if parse_request && check_request; then
             srv 2>&1 >&$fd | sysread buff
             lstatus=$pipestatus[1]
 
