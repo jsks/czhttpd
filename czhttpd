@@ -191,6 +191,8 @@ function parse_request() {
 }
 
 function check_request() {
+    [[ -z $req_headers ]] && return 1
+
     case $req_headers[version] in
         ("HTTP/1.1")
             [[ -z $req_headers[host] ]] && { error_header 400; return 1 };;
@@ -255,15 +257,11 @@ function error_header() {
 }
 
 function html_template() {
-<<EOF
-<!DOCTYPE html><html><head><style type="text/css"> a {text-decoration: none;} a:hover, a:focus { color: white; background: rgba(0,0,0,0.3); cursor: pointer; } h2 { margin-bottom: 10px } table { border-collapse: collapse; } thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; } thead th:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:first-child { padding-right: 30px; } div.list { background-color: #F5F5F5; border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; margin: 4px;} div.footer { font: 90% monospace; color: grey; font-style: italic; padding-left: 4px; }</style><title>czhttpd</title></head><body><h2>Index of $1</h2><div class=list><table><thead><tr><th>Name</th><th>Size</th><th>Type</th></tr></thead><tbody>$@[2,-1]</tbody></table></div><div class=footer>$SERVER_SOFTWARE</div></body></html>
-EOF
+print "<!DOCTYPE html><html><head><style type="text/css"> a {text-decoration: none;} a:hover, a:focus { color: white; background: rgba(0,0,0,0.3); cursor: pointer; } h2 { margin-bottom: 10px } table { border-collapse: collapse; } thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; } thead th:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:first-child { padding-right: 30px; } div.list { background-color: #F5F5F5; border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; margin: 4px;} div.footer { font: 90% monospace; color: grey; font-style: italic; padding-left: 4px; }</style><title>czhttpd</title></head><body><h2>Index of $1</h2><div class=list><table><thead><tr><th>Name</th><th>Size</th><th>Type</th></tr></thead><tbody>$@[2,-1]</tbody></table></div><div class=footer>$SERVER_SOFTWARE</div></body></html>"
 }
 
 function html_fragment() {
-<<EOF
-<tr><td><a href="${1#*/}">${1#*/}</a></td><td>$(calc_size $1)</td><td>$(mime_type $1)</td></tr>
-EOF
+print "<tr><td><a href="${1#*/}">${1#*/}</a></td><td>$(calc_size $1)</td><td>$(mime_type $1)</td></tr>"
 }
 
 function urldecode() {
@@ -531,16 +529,14 @@ while :; do
         [[ $ip_line[3] == "I" ]] && { client_ip=${ip_line[(ws. .)3]}; break }
     done < <(ztcp -L)
 
-    while :; do
-        if parse_request && check_request; then
-            srv 2>&1 >&$fd | sysread buff
-            lstatus=$pipestatus[1]
+    while parse_request && check_request; do
+        srv 2>&1 >&$fd | sysread buff
+        lstatus=$pipestatus[1]
 
-            [[ -n $buff ]] && { log_err "${(M)buff##*[[:alnum:]]}"; unset buff }
+        [[ -n $buff ]] && { log_err "${(M)buff##*[[:alnum:]]}"; unset buff }
 
-            [[ $lstatus != 0 ]] && { log_err "broken socket, closing"; break }
-            [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
-        fi
+        [[ $lstatus != 0 ]] && { log_err "broken socket, closing"; break }
+        [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
     done
 
     ztcp -c
