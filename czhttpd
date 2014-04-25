@@ -261,7 +261,7 @@ print "<!DOCTYPE html><html><head><style type="text/css"> a {text-decoration: no
 }
 
 function html_fragment() {
-print "<tr><td><a href="${1#*/}">${1#*/}</a></td><td>$(calc_size $1)</td><td>$(mime_type $1)</td></tr>"
+print "<tr><td><a href=\"${1#*/}\">${1#*/}</a></td><td>$(calc_size $1)</td><td>$(mime_type $1)</td></tr>"
 }
 
 function urldecode() {
@@ -403,7 +403,7 @@ function handler_search() {
 
 function srv() {
     pathname="${DOCROOT}$(urldecode $req_headers[url])"
-    if [[ -f $pathname ]]; then
+    if [[ -f ${pathname%/} ]]; then
         [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403; return }
 
         # Find a handler for $pathname (e.g. to handle cgi), if not use the default
