@@ -24,6 +24,7 @@ zmodload zsh/zselect
 # zsh options
 unsetopt multibyte
 unsetopt multios
+unsetopt glob_dots
 setopt posix_jobs
 
 # Declare variable types
@@ -42,11 +43,11 @@ typeset cgi_status_code
 
 # Functions
 function error() {
-    print "[$(strftime "%a %d %b, %H:$M:%S" $EPOCHSECONDS)] Fatal Error: $*" >&2 >&$errfd
+    setopt local_options multios
+    print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] Fatal Error: $*" >&2 >&$errfd
 
-    exec {logfd}>&-
-    rm $FIFO 2>/dev/null
-    ztcp -c; exit 113
+    cleanup 2>/dev/null
+    exit 113
 }
 
 function log_f() {
@@ -100,6 +101,7 @@ czhttpd - cloud's zsh http server
 Options
     -c :    Config file location (default: ~/.config/czhttpd/main.conf)
     -h :    Print this help message
+    -p :    Port to bind to (default: 8080)
     -v :    Redirect log messages to stdout
 
 If no file or directory is given, czhttpd defaults to serving
@@ -110,22 +112,35 @@ exit
 }
 
 function parse_conf() {
+    local i
+
     if [[ -f $1 ]]; then
         . $1 || print "Could not source config file $1"
     fi
 
-    (( $hidden_files )) && setopt GLOB_DOTS
-
-    if [[ -d $LOG_DIR ]]; then
-        exec {errfd}>>$LOG_DIR/error.log
-        exec {logfd}>>$LOG_DIR/access.log
+    if [[ -n $LOG_DIR ]]; then
+        if [[ $LOG_DOR == "/dev/null" ]]; then
+           exec {logfd}>/dev/null
+           exec {errfd}>/dev/null
+        elif [[ -d $LOG_DIR ]]; then
+            exec {logfd}>>$LOG_DIR/access.log
+            exec {errfd}>>$LOG_DIR/error.log
+        else
+            error "Invalid log directory $LOG_DIR"
+        fi
     else
-        print "Invalid log directory $LOG_DIR"
+        print "Warning: LOG_DIR not set, output redirected to /dev/null"
+        exec {logfd}>/dev/null
+        exec {errfd}>/dev/null
     fi
 
-    [[ -n $MAX_CONN && $MAX_CONN != <-> ]] && error "Invalid integer for MAX_CONN in conf file $1"
+    [[ -n $FIFO_DIR && ! -d $FIFO_DIR ]] && error "Invalid fifo directory $FIFO_DIR"
 
-
+    for i in MAX_CONN HTTP_KEEP_ALIVE HTTP_TIMEOUT HIDDEN_FILES FOLLOW_SYMLINKS; do
+        if [[ -n ${(P)i} && ${(P)i} != <-> ]]; then
+            error "Invalid integer for $i"
+        fi
+    done
 }
 
 function parse_args() {
@@ -257,11 +272,11 @@ function error_header() {
 }
 
 function html_template() {
-print "<!DOCTYPE html><html><head><style type="text/css"> a {text-decoration: none;} a:hover, a:focus { color: white; background: rgba(0,0,0,0.3); cursor: pointer; } h2 { margin-bottom: 10px } table { border-collapse: collapse; } thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; } thead th:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:first-child { padding-right: 30px; } div.list { background-color: #F5F5F5; border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; margin: 4px;} div.footer { font: 90% monospace; color: grey; font-style: italic; padding-left: 4px; }</style><title>czhttpd</title></head><body><h2>Index of $1</h2><div class=list><table><thead><tr><th>Name</th><th>Size</th><th>Type</th></tr></thead><tbody>$@[2,-1]</tbody></table></div><div class=footer>$SERVER_SOFTWARE</div></body></html>"
+    print "<!DOCTYPE html><html><head><style type="text/css"> a {text-decoration: none;} a:hover, a:focus { color: white; background: rgba(0,0,0,0.3); cursor: pointer; } h2 { margin-bottom: 10px } table { border-collapse: collapse; } thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; } thead th:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:first-child { padding-right: 30px; } div.list { background-color: #F5F5F5; border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; margin: 4px;} div.footer { font: 90% monospace; color: grey; font-style: italic; padding-left: 4px; }</style><title>czhttpd</title></head><body><h2>Index of $1</h2><div class=list><table><thead><tr><th>Name</th><th>Size</th><th>Type</th></tr></thead><tbody>$@[2,-1]</tbody></table></div><div class=footer>$SERVER_SOFTWARE</div></body></html>"
 }
 
 function html_fragment() {
-print "<tr><td><a href=\"${1#*/}\">${1#*/}</a></td><td>$(calc_size $1)</td><td>$(mime_type $1)</td></tr>"
+    listing+="<tr><td><a href=\"${1#*/}\">${1#*/}</a></td><td>$(calc_size $1)</td><td>$(mime_type $1)</td></tr>"
 }
 
 function urldecode() {
@@ -270,9 +285,10 @@ function urldecode() {
 
 function mime_type() {
     [[ -d "$1" ]] && { print "Directory"; return }
+    local file_tail mtype
 
-    local file_tail="${1:t}"
-    if [[ -n $MTYPES[${file_tail#*.}] ]]; then
+    file_tail="${(L)1:t}"
+    if (( $+MTYPES[${file_tail#*.}] )); then
         print $MTYPES[${file_tail#*.}]
     else
         if which file >/dev/null; then
@@ -308,24 +324,24 @@ function calc_size() {
 }
 
 function list_dir() {
-    unset dir dotdir files dotfiles
-    typeset -ga dir dotdir files dotfiles
+    # Ugly I know, but global vars are quicker and they allow us to check the exit status of list_dir()
+    # outside of a pipe.
+    unset listing
+    typeset -ga listing
     local i
 
     cd "$1" || return 1
 
-    [[ "${1%/}" != "${DOCROOT%/}" ]] && dotdir+="$(html_fragment '/../')"
+    [[ "${1%/}" != "${DOCROOT%/}" ]] && html_fragment '/../'
 
-    for i in ./*(Nr); do
-        if [[ $i == ./.* ]]; then
-            [[ -d "$i" ]] && dotdir+="$(html_fragment $i/)"
-            [[ -f "$i" ]] && dotfiles+="$(html_fragment $i)"
-            continue
-        elif [[ -d "$i" ]]; then
-            dir+="$(html_fragment $i/)"
-        else
-            files+="$(html_fragment $i)"
-        fi
+    if (( $HIDDEN_FILES )); then
+        for i in ./.*/(Nr) ./.*(.Nr); do
+            html_fragment "$i"
+        done
+    fi
+
+    for i in ./*/(Nr) ./*(.Nr); do
+        html_fragment "$i"
     done
 
     cd -
@@ -340,7 +356,7 @@ function send_list() {
         return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Transfer-Encoding: chunked"
         send_chunk
         log_f "200"
-    fi } < <(html_template $1 $dotdir $dotfiles $dir $files)
+    fi } < <(html_template $1 $listing)
 }
 
 function send_file() {
@@ -433,11 +449,12 @@ function srv() {
 
 function cleanup() {
     for i in ${(SM)jobstates##<->}; do
-        kill $i 2>/dev/null
+        kill $i
     done
 
     log_f "> Exiting main"
-    exec {logfd}>&-; exec {fifofd}>&-
+    exec {logfd}>&-; exec {errfd}>&-
+    exec {fifofd}>&-
     rm $FIFO; ztcp -c
 }
 
@@ -449,7 +466,7 @@ function TRAPCHLD() {
 }
 
 # Main
-trap "cleanup; exit" INT KILL TERM
+trap "cleanup 2>/dev/null; exit" INT KILL TERM
 
 readonly SERVER_NAME="$(ip_addr)"
 readonly SERVER_ADDR="$SERVER_NAME"
@@ -464,11 +481,6 @@ LOG_FORMAT=( '[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)]'
              '$req_headers[version]' )
 readonly LOG_FORMAT
 
-
-# By default discard logging output
-exec {logfd}>/dev/null
-exec {errfd}>/dev/null
-
 # Parse cli options and config file
 parse_args $*
 
@@ -478,7 +490,8 @@ log_f "PORT: ${PORT:=8080}"
 log_f "HTTP_KEEP_ALIVE: ${HTTP_KEEP_ALIVE:=1}"
 log_f "INDEX_FILE: ${INDEX_FILE:=index.html}"
 log_f "HIDDEN_FILES: ${HIDDEN_FILES:=0}"
-log_f "LOG_DIR: ${LOG_DIR:=~/.config/czhttpd/log}"
+log_f "FOLLOW_SYMLINKS: ${FOLLOW_SYMLINKS:=0}"
+log_f "LOG_DIR: ${LOG_DIR:=/dev/null}"
 log_f "FIFO_DIR: ${FIFO_DIR:=/tmp}"
 
 if [[ -z $MTYPES ]]; then
