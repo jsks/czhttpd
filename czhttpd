@@ -26,6 +26,8 @@ unsetopt multibyte
 unsetopt multios
 unsetopt glob_dots
 setopt posix_jobs
+setopt err_return
+setopt bare_glob_qual
 
 # Declare variable types
 integer logfd
@@ -136,8 +138,14 @@ function parse_conf() {
 
     [[ -n $FIFO_DIR && ! -d $FIFO_DIR ]] && error "Invalid fifo directory $FIFO_DIR"
 
-    for i in MAX_CONN HTTP_KEEP_ALIVE HTTP_TIMEOUT HIDDEN_FILES FOLLOW_SYMLINKS; do
+    for i in MAX_CONN HTTP_TIMEOUT; do
         if [[ -n ${(P)i} && ${(P)i} != <-> ]]; then
+            error "Invalid integer for $i"
+        fi
+    done
+
+    for i in HTTP_KEEP_ALIVE HIDDEN_FILES FOLLOW_SYMLINKS; do
+        if [[ -n ${(P)i} && ${(P)i} != [01] ]]; then
             error "Invalid integer for $i"
         fi
     done
@@ -284,6 +292,8 @@ function urldecode() {
 }
 
 function mime_type() {
+    [[ -h "${1%/}" ]] && print -n "symbolic link->"
+
     [[ -d "$1" ]] && { print "Directory"; return }
     local file_tail mtype
 
@@ -300,7 +310,7 @@ function mime_type() {
                 ("text/"*)
                     print "text/plain";;
                 (*)
-                    print "${mtype#application/x-executable}";;
+                    print "${${mtype#application/x-executable}:-application/octet-stream}";;
             esac
         else
             print ${MTYPES[default]:-application/octet-stream}
@@ -330,17 +340,17 @@ function list_dir() {
     typeset -ga listing
     local i
 
-    cd "$1" || return 1
+    cd "$1"
 
     [[ "${1%/}" != "${DOCROOT%/}" ]] && html_fragment '/../'
 
     if (( $HIDDEN_FILES )); then
-        for i in ./.*/(Nr) ./.*(.Nr); do
+        for i in ./.*(-/NrT) ./.*(-.Nr); do
             html_fragment "$i"
         done
     fi
 
-    for i in ./*/(Nr) ./*(.Nr); do
+    for i in ./*(-/NrT) ./*(-.Nr); do
         html_fragment "$i"
     done
 
@@ -348,12 +358,10 @@ function list_dir() {
 }
 
 function send_list() {
-    local mtype="text/html"
-
-    list_dir $1 || return 1
+    list_dir $1
 
     { if ! filter_search; then
-        return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Transfer-Encoding: chunked"
+        return_header "200 Ok" "Content-type: text/html; charset=UTF-8" "Transfer-Encoding: chunked"
         send_chunk
         log_f "200"
     fi } < <(html_template $1 $listing)
@@ -419,16 +427,15 @@ function handler_search() {
 
 function srv() {
     pathname="${DOCROOT}$(urldecode $req_headers[url])"
-    if [[ -f ${pathname%/} ]]; then
-        [[ $options[globdots] == off && ${pathname:t} == .* ]] && { error_header 403; return }
+    [[ $HIDDEN_FILES != "1" && ${pathname:t} == .* ]] && { error_header 403; return }
+    [[ $FOLLOW_SYMLINKS != "1" && -h ${pathname%/} ]] && { error_header 403; return }
 
+    if [[ -f ${pathname%/} ]]; then
         # Find a handler for $pathname (e.g. to handle cgi), if not use the default
         if ! handler_search $pathname; then
             default_handler $pathname
         fi
     elif [[ -d $pathname ]]; then
-        [[ $FOLLOW_SYMLINKS == 0 && -h ${pathname%/} ]] && { error_header 403; return }
-
         if [[ -f $pathname/$INDEX_FILE ]]; then
             if ! handler_search $pathname/$INDEX_FILE; then
                 default_handler $pathname/$INDEX_FILE
@@ -437,8 +444,10 @@ function srv() {
             if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
                 error_header 301 "http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
                 return
+            elif [[ -r "$pathname" && -x "$pathname" ]]; then
+                send_list "$pathname"
             else
-                send_list "$pathname" || { error_header 403; return }
+                error_header 403
             fi
         fi
     else
