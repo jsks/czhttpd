@@ -22,17 +22,11 @@ zmodload zsh/system
 zmodload zsh/zselect
 
 # zsh options
-unsetopt multibyte
-unsetopt multios
-unsetopt glob_dots
-setopt posix_jobs
-setopt err_return
-setopt bare_glob_qual
+unsetopt multibyte multios glob_dots
+setopt posix_jobs err_return bare_glob_qual
 
 # Declare variable types
-integer logfd
-integer errfd
-integer fifofd
+integer logfd errfd fifofd
 
 typeset -A MTYPES
 typeset -a LOG_FORMAT
@@ -75,8 +69,7 @@ function timeout() {
 }
 
 function ip_addr() {
-    local -a tcp_list
-    local -a ip
+    local -a tcp_list ip
     local i k v
 
     tcp_list=("${(f@)$(</proc/net/tcp)}")
@@ -122,18 +115,15 @@ function parse_conf() {
 
     if [[ -n $LOG_DIR ]]; then
         if [[ $LOG_DOR == "/dev/null" ]]; then
-           exec {logfd}>/dev/null
-           exec {errfd}>/dev/null
+           exec {logfd}>/dev/null {errfd}>/dev/null
         elif [[ -d $LOG_DIR ]]; then
-            exec {logfd}>>$LOG_DIR/access.log
-            exec {errfd}>>$LOG_DIR/error.log
+            exec {logfd}>>$LOG_DIR/access.log {errfd}>>$LOG_DIR/error.log
         else
             error "Invalid log directory $LOG_DIR"
         fi
     else
         print "Warning: LOG_DIR not set, output redirected to /dev/null"
-        exec {logfd}>/dev/null
-        exec {errfd}>/dev/null
+        exec {logfd}>/dev/null {errfd}>/dev/null
     fi
 
     [[ -n $FIFO_DIR && ! -d $FIFO_DIR ]] && error "Invalid fifo directory $FIFO_DIR"
@@ -280,11 +270,11 @@ function error_header() {
 }
 
 function html_template() {
-    print "<!DOCTYPE html><html><head><style type="text/css"> a {text-decoration: none;} a:hover, a:focus { color: white; background: rgba(0,0,0,0.3); cursor: pointer; } h2 { margin-bottom: 10px } table { border-collapse: collapse; } thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; } thead th:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:first-child { padding-right: 30px; } div.list { background-color: #F5F5F5; border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; margin: 4px;} div.footer { font: 90% monospace; color: grey; font-style: italic; padding-left: 4px; }</style><title>czhttpd</title></head><body><h2>Index of $1</h2><div class=list><table><thead><tr><th>Name</th><th>Size</th><th>Type</th></tr></thead><tbody>$@[2,-1]</tbody></table></div><div class=footer>$SERVER_SOFTWARE</div></body></html>"
+    print "<!DOCTYPE html><html><head><style type="text/css"> a {text-decoration: none;} a:hover, a:focus { color: white; background: rgba(0,0,0,0.3); cursor: pointer; } h2 { margin-bottom: 10px } table { border-collapse: collapse; } thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; } thead th:nth-child(2) { text-align: left; padding-right: 12px; } tbody td:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:first-child { padding-right: 30px; } div.list { background-color: #F5F5F5; border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; margin: 4px;} div.footer { font: 90% monospace; color: grey; font-style: italic; padding-left: 4px; }</style><title>czhttpd</title></head><body><h2>Index of $1</h2><div class=list><table><thead><tr><th>Name</th><th>Last-Modified</th><th>Size</th><th>Type</th></tr></thead><tbody>$@[2,-1]</tbody></table></div><div class=footer>$SERVER_SOFTWARE</div></body></html>"
 }
 
 function html_fragment() {
-    listing+="<tr><td><a href=\"${1#*/}\">${1#*/}</a></td><td>$(calc_size $1)</td><td>$(mime_type $1)</td></tr>"
+    listing+="<tr><td><a href=\"${1#*/}\">${1#*/}</a></td><td>$(mtime $1)</td><td>$(calc_size $1)</td><td>$(mime_type $1)</td></tr>"
 }
 
 function urldecode() {
@@ -320,6 +310,7 @@ function mime_type() {
 
 function calc_size() {
     [[ -d "$1" ]] && { print "\-"; return }
+    local KB MB GB size
 
     KB=1024.0
     MB=1048576.0
@@ -333,11 +324,14 @@ function calc_size() {
     (( $size > $GB )) && { printf '%.1f%s\n' "$((size/$GB))" "G" && return }
 }
 
+function mtime() {
+    stat -L -F "%d-%b-%Y %H:%M" +mtime $1 2>/dev/null || print "\-"
+}
+
 function list_dir() {
     # Ugly I know, but global vars are quicker and they allow us to check the exit status of list_dir()
     # outside of a pipe.
-    unset listing
-    typeset -ga listing
+    unset listing; typeset -ga listing
     local i
 
     cd "$1"
@@ -426,7 +420,8 @@ function handler_search() {
 }
 
 function srv() {
-    pathname="${DOCROOT}$(urldecode $req_headers[url])"
+    local pathname="${DOCROOT}$(urldecode $req_headers[url])"
+
     [[ $HIDDEN_FILES != "1" && ${pathname:t} == .* ]] && { error_header 403; return }
     [[ $FOLLOW_SYMLINKS != "1" && -h ${pathname%/} ]] && { error_header 403; return }
 
