@@ -1,5 +1,9 @@
-#!/usr/bin/zsh
+#!/usr/bin/env zsh
+### czhttpd
 # zsh web server
+# Author: jsks
+# Site: http://github.com/jsks/czhttpd.git
+###
 
 # Clear env
 for z in ${(SM)$(export)#*=}; do
@@ -11,7 +15,7 @@ for z in ${(SM)$(export)#*=}; do
     esac
 done
 
-export PATH=/bin:/usr/bin
+export PATH=/sbin:/bin:/usr/bin
 
 # Load Modules
 zmodload zsh/net/tcp
@@ -21,7 +25,15 @@ zmodload zsh/datetime
 zmodload zsh/system
 zmodload zsh/zselect
 
-# zsh options
+### zsh options
+# unset:
+#   multibyte - to accurately get length of utf8 strings
+#   multios - prevent duplication of stderr when logging output of `srv`
+#   glob_dots - prevent iterating through dot files automatically
+# set:
+#   posix_jobs - for handling jobs in communicating parent<-child
+#   err_return - handle errors @ highest calling level
+#   bare_glob_qual - required for our patterns in `list_dir`
 unsetopt multibyte multios glob_dots
 setopt posix_jobs err_return bare_glob_qual
 
@@ -68,7 +80,7 @@ function timeout() {
     kill $pid2 2>/dev/null
 }
 
-function ip_addr() {
+function ip_addr_linux() {
     local -a tcp_list ip
     local i k v
 
@@ -85,6 +97,28 @@ function ip_addr() {
     done
 
     printf "%d.%d.%d.%d\n" ${(Oa)ip[@]}
+}
+
+function ip_addr_osx() {
+    local line
+
+    while read line; do
+        if [[ ${line[(ws. .)1]} == "inet"  && ${line[(ws. .)2]} != "127.0.0.1" ]]; then
+            print ${line[(ws. .)2]}
+            return
+        fi
+    done < <(ifconfig)
+}
+
+function ip_addr() {
+    if [[ $OSTYPE == darwin* ]]; then
+        ip_addr_osx
+    elif [[ $OSTYPE == linux* ]]; then
+        ip_addr_linux
+    else
+        print "127.0.0.1"
+    fi
+
 }
 
 function help() {
@@ -329,8 +363,8 @@ function mtime() {
 }
 
 function list_dir() {
-    # Ugly I know, but global vars are quicker and they allow us to check the exit status of list_dir()
-    # outside of a pipe.
+    # Return a global array
+    # Ugly I know, but global vars are quicker
     unset listing; typeset -ga listing
     local i
 
@@ -351,6 +385,11 @@ function list_dir() {
     cd -
 }
 
+### send_list - dynamically list directory contents
+# - list_dir fills a global array 'listing' with a html fragment for each file/dir
+# - Pass `listing` as an argument to html_template and redirect output
+# - Search for a filter that may want to handle output (ie compression)
+# - Or, send our html page as plaintext using chunked encoding (hopefully improves latency)
 function send_list() {
     list_dir $1
 
@@ -382,6 +421,8 @@ function send_chunk() {
     fi
 }
 
+### default_handler
+# Our default handler to simply send requested file to client
 function default_handler() {
     local -A file_array
 
@@ -399,6 +440,8 @@ function default_handler() {
     log_f "200"
 }
 
+### filter_search
+# How to handle output stream
 function filter_search() {
     local i
 
@@ -407,6 +450,8 @@ function filter_search() {
     return 1
 }
 
+### handler_search
+# How to handle a requested file (send or exec?)
 function handler_search() {
     local i
 
@@ -462,6 +507,9 @@ function cleanup() {
     rm $FIFO; ztcp -c
 }
 
+### TRAPCHLD
+# Run this function as a trap rather than in main() so that we trigger a flush
+# when ${#jobstates} < $MAX_CONN
 function TRAPCHLD() {
     # Flush fifo data so we don't fill up the pipe (do we really care about the child's exit status?)
     while sysread -t 0 -i $fifofd -o 1 1>/dev/null; do
@@ -469,9 +517,10 @@ function TRAPCHLD() {
     done
 }
 
-# Main
+### Main
 trap "cleanup 2>/dev/null; exit" INT KILL TERM
 
+# Protect these vars from user
 readonly SERVER_NAME="$(ip_addr)"
 readonly SERVER_ADDR="$SERVER_NAME"
 readonly SERVER_SOFTWARE="czhttpd/$(printf '%.1f\n' "$((RANDOM/10000.0))")b"
@@ -525,6 +574,7 @@ fi
 
 http_listen
 
+# For communication with our child processes
 FIFO=$FIFO_DIR/czhttpd-$$.fifo
 mkfifo $FIFO 2>/dev/null || error "Can not create fifo, $FIFO"
 exec {fifofd}<>$FIFO
@@ -547,6 +597,9 @@ while :; do
     done < <(ztcp -L)
 
     while parse_request && check_request; do
+        # Use a pipe since process substitution, >(...), spawns a subprocess so $buff would not
+        # be available to our shell instance. Also, >(sysread buff && log_err $buff) doesn't work
+        # (subshell not getting a copy of errfd?).
         srv 2>&1 >&$fd | sysread buff
         lstatus=$pipestatus[1]
 
@@ -557,6 +610,8 @@ while :; do
     done
 
     ztcp -c
+
+    # Write junk to our fifo to indicate to the parent process that our child will soon exit
     print "0" >&$fifofd ) &
 
     ztcp -c $REPLY
