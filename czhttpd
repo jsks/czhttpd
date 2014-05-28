@@ -99,7 +99,7 @@ function ip_addr_linux() {
     printf "%d.%d.%d.%d\n" ${(Oa)ip[@]}
 }
 
-function ip_addr_osx() {
+function ip_addr_unix() {
     local line
 
     while read line; do
@@ -111,14 +111,13 @@ function ip_addr_osx() {
 }
 
 function ip_addr() {
-    if [[ $OSTYPE == darwin* ]]; then
-        ip_addr_osx
-    elif [[ $OSTYPE == linux* ]]; then
+    if [[ -f /proc/net/tcp ]]; then
         ip_addr_linux
+    elif whence ifconfig >/dev/null; then
+        ip_addr_unix
     else
         print "127.0.0.1"
     fi
-
 }
 
 function help() {
@@ -520,12 +519,6 @@ function TRAPCHLD() {
 ### Main
 trap "cleanup 2>/dev/null; exit" INT KILL TERM
 
-# Protect these vars from user
-readonly SERVER_NAME="$(ip_addr)"
-readonly SERVER_ADDR="$SERVER_NAME"
-readonly SERVER_SOFTWARE="czhttpd/$(printf '%.1f\n' "$((RANDOM/10000.0))")b"
-readonly SERVER_PROTOCOL="HTTP/1.1"
-readonly GATEWAY_INTERFACE="CGI/1.1"
 LOG_FORMAT=( '[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)]'
              '[pid: $sysparams[pid]]'
              '$client_ip'
@@ -540,12 +533,20 @@ parse_args $*
 # Set our default variables
 log_f "MAXCONN: ${MAX_CONN:=12}"
 log_f "PORT: ${PORT:=8080}"
+log_f "IP_REDIRECT: ${IP_REDIRECT:=$(ip_addr)}"
+log_f "IP_ACCEPT: ${IP_ACCEPT:=[0-9*].[0-9*].[0-9*].[0-9*]}"
 log_f "HTTP_KEEP_ALIVE: ${HTTP_KEEP_ALIVE:=1}"
 log_f "INDEX_FILE: ${INDEX_FILE:=index.html}"
 log_f "HIDDEN_FILES: ${HIDDEN_FILES:=0}"
 log_f "FOLLOW_SYMLINKS: ${FOLLOW_SYMLINKS:=0}"
 log_f "LOG_DIR: ${LOG_DIR:=/dev/null}"
 log_f "FIFO_DIR: ${FIFO_DIR:=/tmp}"
+
+readonly SERVER_NAME="$IP_REDIRECT"
+readonly SERVER_ADDR="$SERVER_NAME"
+readonly SERVER_SOFTWARE="czhttpd/$(printf '%.1f\n' "$((RANDOM/10000.0))")b"
+readonly SERVER_PROTOCOL="HTTP/1.1"
+readonly GATEWAY_INTERFACE="CGI/1.1"
 
 if [[ -z $MTYPES ]]; then
     MTYPES=( pdf       application/pdf
@@ -595,6 +596,15 @@ while :; do
     while read ip_line; do
         [[ $ip_line[3] == "I" ]] && { client_ip=${ip_line[(ws. .)3]}; break }
     done < <(ztcp -L)
+
+    for i in ${(s.,.)IP_ACCEPT}; do
+        if [[ $client_ip =~ [^$IP_ACCEPT] ]]; then
+            log_f "disconnected client matching filter $i"
+            ztcp -c
+            print "0" >&$fifofd
+            exit 1
+        fi
+    done
 
     while parse_request && check_request; do
         # Use a pipe since process substitution, >(...), spawns a subprocess so $buff would not
