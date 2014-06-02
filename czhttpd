@@ -390,10 +390,11 @@ function list_dir() {
 # - Search for a filter that may want to handle output (ie compression)
 # - Or, send our html page as plaintext using chunked encoding (hopefully improves latency)
 function send_list() {
+    local mtype="text/html"
     list_dir $1
 
     { if ! filter_search; then
-        return_header "200 Ok" "Content-type: text/html; charset=UTF-8" "Transfer-Encoding: chunked"
+        return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Transfer-Encoding: chunked"
         send_chunk
         log_f "200"
     fi } < <(html_template $1 $listing)

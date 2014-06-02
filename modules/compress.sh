@@ -8,7 +8,7 @@
 
 function compression_filter() {
     if check_if_compression $1; then
-        return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Encoding: gzip" "Transfer-Encoding: chunked"
+        return_header "200 Ok" "Content-type: ${mtype:-application:octet-stream}; charset=UTF-8" "Content-Encoding: gzip" "Transfer-Encoding: chunked"
         if [[ $req_headers[method] != "HEAD" ]]; then
             if [[ -n $1 ]]; then
                 gzip -$COMPRESS_LEVEL -c $1 | send_chunk
