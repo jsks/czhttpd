@@ -15,6 +15,7 @@ The primary goal of this project was to write a web server using pure zsh. There
 - Basic support for HTTP/1.1
     - Including: HEAD, GET, POST
 - Dynamic directory listing
+    - With primitive caching
 - UTF-8 support
 - Multiple concurrent connections
 - Module support for:
@@ -22,14 +23,19 @@ The primary goal of this project was to write a web server using pure zsh. There
     - Basic CGI/1.1 support
         - phpMyAdmin appears fully functional, and partially Wordpress (requires configuring for an alternative port)
 
-### Optional Dependency:
-- `file`
+### Optional Dependencies:
+- Fallback mime-type support:
+    - `file`
+- Directory caching:
+    - Linux: `inotify-tools`
+    - OSX/BSD: `wait_on`
 
 ### Usage:
 ```
 czhttpd [OPTIONS] <file or dir>
 - Options
     -c :    Configuration file (default: ~/.config/czhttpd/conf/main.conf)
+    -p :    Port to bind to (default: 8080)
     -h :    Print useless help message
     -v :    Redirect logging to stdout
 
@@ -37,9 +43,13 @@ If no file or directory is given, czhttpd defaults to serving the current direct
 ```
 
 ### Configuration:
-The provided sample main.conf lists the variables that can be changed. Any additional files or modules can be sourced using the standard shell command, `source`. Currently, there are only two modules, cgi.sh and compress.sh. Their description and use should be listed in the respective cgi.conf and compress.conf config files.
+The provided sample `main.conf` lists the variables that can be changed. Any additional files or modules can be sourced using the standard shell command, `source`. Currently, there are only two modules, `cgi.sh` and `compress.sh`. Their description and use should be listed in the respective `cgi.conf` and `compress.conf` config files.
 
-By default, czhttpd searches for main.conf in `~/.config/czhttpd/conf/`. An alternative config file can be specified with the commandline option `-c`.
+By default, czhttpd searches for `main.conf` in `~/.config/czhttpd/conf/`. An alternative config file can be specified with the commandline option `-c`.
+
+### TODO:
+- [ ] Expand directory caching to work with osx/bsd
+    - Also, enable caching of compressed pages
 
 ---
 

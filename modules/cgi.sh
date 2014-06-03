@@ -50,7 +50,7 @@ function exec_cgi() {
     [[ ${1##*.} == "php" ]] && cmd="php-cgi"
 
     log_f "Executing cgi script $1"
-    coproc { timeout $cmd "$1" <&$fd }
+    coproc { timeout "$cmd $1" $CGI_TIMEOUT <&$fd }
     pid=$!
 
     while read -r -p line; do
