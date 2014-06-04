@@ -15,9 +15,9 @@ The primary goal of this project was to write a web server using pure zsh. There
 - Basic support for HTTP/1.1
     - Including: HEAD, GET, POST
 - Dynamic directory listing
-    - With primitive caching
 - UTF-8 support
 - Multiple concurrent connections
+- Primitive caching of root directory listing and compressed files
 - Module support for:
     - Gzip compression
     - Basic CGI/1.1 support
@@ -49,7 +49,7 @@ By default, czhttpd searches for `main.conf` in `~/.config/czhttpd/conf/`. An al
 
 ### TODO:
 - [ ] Expand directory caching to work with osx/bsd
-    - Also, enable caching of compressed pages
+    - [X] Also, enable caching of compressed pages
 
 ---
 

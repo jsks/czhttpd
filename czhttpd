@@ -385,20 +385,22 @@ function list_dir() {
 }
 
 function spawn_cache_worker() {
+    setopt noerrreturn
+
     mkdir $CACHE_DIR 2>/dev/null
 
     (trap "worker_cleanup; exit" KILL TERM
     setopt globdots
 
     function worker_cleanup() {
-        for i in $CACHE_DIR/*(N); rm $i
+        for i in $CACHE_DIR/*(N); rm -fr $i
     }
 
     while :; do
         while read line; do
             lockfile="$CACHE_DIR/${line[(ws. .)1]:gs/\//.}"
             cache_file="${lockfile%.}.html"
-            while ! mkdir $lockfile; do
+            while ! mkdir $lockfile 2>/dev/null; do
                 continue
             done
 
@@ -414,10 +416,9 @@ function spawn_cache_worker() {
 # - Search for a filter that may want to handle output (ie compression)
 # - Or, send our html page as plaintext using chunked encoding (hopefully improves latency)
 function send_list() {
-    setopt multios
     local mtype="text/html"
 
-    if (( $CACHE )); then
+    if [[ $CACHE == 1 && ${1%/} == ${DOCROOT%/} ]]; then
         local lockfile="${CACHE_DIR}/${1:gs/\//.}"
         local cache_file="${lockfile%.}.html"
 
@@ -426,22 +427,23 @@ function send_list() {
             continue
         done
 
-        { if [[ -f $cache_file ]]; then
-            default_handler $cache_file
+        # Definitely slower than multios, but easier to deal with compression
+        if [[ ! -f $cache_file ]]; then
+            list_dir $1
+            html_template $1 $listing > $cache_file
+        fi
 
-            return
-        fi } always { rmdir $lockfile }
+        cd $CACHE_DIR
+        { default_handler ${cache_file:t} } always { cd -; rmdir $lockfile }
     else
-        local cache_file=/dev/null
+        list_dir $1
+
+        if ! filter_search $1; then
+            return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Transfer-Encoding: chunked"
+            send_chunk
+            log_f "200"
+        fi < <(html_template $1 $listing)
     fi
-
-    list_dir $1
-
-    if ! filter_search; then
-        return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Transfer-Encoding: chunked"
-        send_chunk
-        log_f "200"
-    fi < <(html_template $1 $listing >&1 >$cache_file)
 }
 
 function send_file() {
@@ -468,19 +470,17 @@ function send_chunk() {
 ### default_handler
 # Our default handler to simply send requested file to client
 function default_handler() {
-    local -A file_array
-    : ${mtype:=$(mime_type $1)}
-
-    stat -H file_array $1
+    # Save mime-type and size to local vars so that our filter modules can inherit them
+    [[ -z $mtype ]] && local mtype=$(mime_type $1)
+    local fsize=$(stat -L +size $1)
 
     # Find a filter, e.g. to compress output, if not send raw file
     if ! filter_search $1; then
-        return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $file_array[size]"
+        return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $fsize"
         send_file $1
     fi
 
     log_f "200"
-    unset mtype
 }
 
 ### filter_search
@@ -548,7 +548,7 @@ function cleanup() {
     log_f "> Exiting main"
     exec {logfd}>&-; exec {errfd}>&-
     exec {fifofd}>&-
-    rm $FIFO; rmdir $CACHE_DIR
+    rm $FIFO; rm -rf $CACHE_DIR
     ztcp -c
 }
 
