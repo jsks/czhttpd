@@ -15,7 +15,7 @@ for z in ${(SM)$(export)#*=}; do
     esac
 done
 
-export PATH=/sbin:/bin:/usr/bin
+export PATH=/sbin:/bin:/usr/bin:/usr/local/bin
 
 # Load Modules
 zmodload zsh/net/tcp
@@ -45,9 +45,7 @@ typeset -a LOG_FORMAT
 
 # Internal function variables that need global scope
 typeset -A req_headers
-typeset -a dotdir dotfiles dir files
-typeset -a cgi_head cgi_body
-typeset cgi_status_code
+typeset -a listing
 
 # Functions
 function error() {
@@ -80,6 +78,40 @@ function timeout() {
     kill $pid2 2>/dev/null
 }
 
+### mklock
+# `flock` is not available on osx; `mkdir` is atomic so use that as a pseudo-lock
+function mklock() {
+    while ! mkdir $1 >/dev/null; do
+        continue
+    done
+}
+
+### os_probe
+# Platform specific code dealing with setting our ip address and how to monitor
+# file changes (inotify/kqueue)
+function os_probe() {
+    typeset -g ip_addr MONITOR_CMD
+
+    case $OSTYPE in
+        (linux*)
+            ip_addr="ip_addr_linux"
+            if ! whence inotifywait >/dev/null; then
+                log_err "Cannot find command 'inotifywait', file monitoring disabled"
+            else
+                MONITOR_CMD="inotifywait -q -m -e modify,move,create,delete"
+            fi;;
+        (darwin*|freebsd*)
+            ip_addr="ip_addr_unix"
+            if ! whence wait_on >/dev/null; then
+                log_err "Cannot find command 'wait_on', file monitoring disabled"
+            else
+                MONITOR_CMD="/usr/local/bin/wait_on -h -w"
+            fi;;
+        (*)
+            return 1;;
+    esac
+}
+
 function ip_addr_linux() {
     local -a tcp_list ip
     local i k v
@@ -108,16 +140,6 @@ function ip_addr_unix() {
             return
         fi
     done < <(ifconfig)
-}
-
-function ip_addr() {
-    if [[ -f /proc/net/tcp ]]; then
-        ip_addr_linux
-    elif whence ifconfig >/dev/null; then
-        ip_addr_unix
-    else
-        print "127.0.0.1"
-    fi
 }
 
 function help() {
@@ -388,6 +410,7 @@ function spawn_cache_worker() {
     setopt noerrreturn
 
     mkdir $CACHE_DIR 2>/dev/null
+    [[ -z $MONITOR_CMD ]] && return 1
 
     (trap "worker_cleanup; exit" KILL TERM
     setopt globdots
@@ -398,15 +421,13 @@ function spawn_cache_worker() {
 
     while :; do
         while read line; do
-            lockfile="$CACHE_DIR/${line[(ws. .)1]:gs/\//.}"
+            lockfile="$CACHE_DIR/${DOCROOT:gs/\//.}"
             cache_file="${lockfile%.}.html"
-            while ! mkdir $lockfile 2>/dev/null; do
-                continue
-            done
+            mklock $lockfile
 
             { rm $cache_file 2>/dev/null } always { rmdir $lockfile }
             unset lockfile cache_file
-        done < <(inotifywait -q -m -e modify,move,create,delete $DOCROOT)
+        done < <(${(z)MONITOR_CMD} $DOCROOT)
     done) &
 }
 
@@ -421,11 +442,7 @@ function send_list() {
     if [[ $CACHE == 1 && ${1%/} == ${DOCROOT%/} ]]; then
         local lockfile="${CACHE_DIR}/${1:gs/\//.}"
         local cache_file="${lockfile%.}.html"
-
-        # `flock` is not available on osx; `mkdir` is atomic so use that as a pseudo-lock
-        while ! mkdir $lockfile 2>/dev/null; do
-            continue
-        done
+        mklock $lockfile
 
         # Definitely slower than multios, but easier to deal with compression
         if [[ ! -f $cache_file ]]; then
@@ -574,11 +591,12 @@ readonly LOG_FORMAT
 
 # Parse cli options and config file
 parse_args $*
+os_probe || error "Unsupported platform"
 
 # Set our default variables
 log_f "MAXCONN: ${MAX_CONN:=12}"
 log_f "PORT: ${PORT:=8080}"
-log_f "IP_REDIRECT: ${IP_REDIRECT:=$(ip_addr)}"
+log_f "IP_REDIRECT: ${IP_REDIRECT:=$(${(e)ip_addr})}"
 log_f "IP_ACCEPT: ${IP_ACCEPT:=[0-9*].[0-9*].[0-9*].[0-9*]}"
 log_f "HTTP_KEEP_ALIVE: ${HTTP_KEEP_ALIVE:=1}"
 log_f "INDEX_FILE: ${INDEX_FILE:=index.html}"
@@ -628,7 +646,7 @@ mkfifo $FIFO 2>/dev/null || error "Can not create fifo, $FIFO"
 exec {fifofd}<>$FIFO
 
 # For monitoring when our cache becomes invalid
-(( $CACHE )) && spawn_cache_worker
+(( $CACHE )) && { spawn_cache_worker || error "Failed to initialise cache_worker" }
 
 while :; do
     # Use select to block until a child writes to fifo on exit

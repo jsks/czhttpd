@@ -5,13 +5,15 @@ Simple http server written in 99.9% pure zsh<br>
 
 **Disclaimer**: This is *not* intended for serious use.
 
-The primary goal of this project was to write a web server using pure zsh. There is only a single optional dependency, `file`, used as a matter of convenience by czhttpd to determine the mimetype for files without an extension. As such, czhttpd is not portable between shells (POSIX, what?) and, of course, has terrible performance and scalability since it spawns a separate child process to handle each incoming connection. It's also a shell script. On top of that, I shouldn't even have to mention the (lack of) security...
+The primary goal of this project was to write a web server using pure zsh. As such, czhttpd is not portable between shells (POSIX, what?) and, of course, has terrible performance and scalability since it spawns a separate child process to handle each incoming connection. It's also a shell script. On top of that, I shouldn't even have to mention the (lack of) security...
 
 ---  
 <br>
 **So why write it?** Because it's fun, and I have found use for czhttpd in quickly serving files on a local network and testing web pages.
 
 ### Features:
+*Tested on Linux and OS X. {Free,Net,Open}BSD should work; however, they are completely untested.*
+
 - Basic support for HTTP/1.1
     - Including: HEAD, GET, POST
 - Dynamic directory listing
@@ -28,7 +30,7 @@ The primary goal of this project was to write a web server using pure zsh. There
     - `file`
 - Directory caching:
     - Linux: `inotify-tools`
-    - OSX/BSD: `wait_on`
+    - OSX/FreeBSD: `wait_on`
 
 ### Usage:
 ```
@@ -48,7 +50,7 @@ The provided sample `main.conf` lists the variables that can be changed. Any add
 By default, czhttpd searches for `main.conf` in `~/.config/czhttpd/conf/`. An alternative config file can be specified with the commandline option `-c`.
 
 ### TODO:
-- [ ] Expand directory caching to work with osx/bsd
+- [X] Expand directory caching to work with osx/bsd
     - [X] Also, enable caching of compressed pages
 
 ---

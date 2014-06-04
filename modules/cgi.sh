@@ -5,6 +5,10 @@
 : ${CGI_EXTS:="php"}
 : ${CGI_TIMEOUT=300}
 
+# Declare internal function variables that need global scope
+typeset -a cgi_head cgi_body
+typeset cgi_status_code
+
 function cgi_handler() {
     if check_if_cgi $1; then
         exec_cgi $1 || <&p >/dev/null
