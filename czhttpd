@@ -81,7 +81,7 @@ function timeout() {
 ### mklock
 # `flock` is not available on osx; `mkdir` is atomic so use that as a pseudo-lock
 function mklock() {
-    while ! mkdir $1 >/dev/null; do
+    while ! mkdir $1 2>/dev/null; do
         continue
     done
 }
