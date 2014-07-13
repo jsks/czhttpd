@@ -29,8 +29,7 @@ The primary goal of this project was to write a web server using pure zsh. As su
 - Fallback mime-type support:
     - `file`
 - Directory caching:
-    - Linux: `inotify-tools`
-    - OSX/FreeBSD: `wait_on`
+    - `fswatch`
 
 ### Usage:
 ```

@@ -86,29 +86,14 @@ function mklock() {
     done
 }
 
-### os_probe
-# Platform specific code dealing with setting our ip address and how to monitor
-# file changes (inotify/kqueue)
-function os_probe() {
-    typeset -g ip_addr MONITOR_CMD
-
+function ip_addr() {
     case $OSTYPE in
         (linux*)
-            ip_addr="ip_addr_linux"
-            if ! whence inotifywait >/dev/null; then
-                log_err "Cannot find command 'inotifywait', file monitoring disabled"
-            else
-                MONITOR_CMD="inotifywait -q -m -e modify,move,create,delete"
-            fi;;
-        (darwin*|freebsd*)
-            ip_addr="ip_addr_unix"
-            if ! whence wait_on >/dev/null; then
-                log_err "Cannot find command 'wait_on', file monitoring disabled"
-            else
-                MONITOR_CMD="/usr/local/bin/wait_on -h -w"
-            fi;;
+            ip_addr_linux;;
+        (darwin*|*bsd*)
+            ip_addr_unix;;
         (*)
-            return 1;;
+            print "127.0.0.1";;
     esac
 }
 
@@ -410,7 +395,10 @@ function spawn_cache_worker() {
     setopt noerrreturn
 
     mkdir $CACHE_DIR 2>/dev/null
-    [[ -z $MONITOR_CMD ]] && return 1
+    if ! whence fswatch >/dev/null; then
+        log_err "Can't find fswatch"
+        return 1
+    fi
 
     (trap "worker_cleanup; exit" KILL TERM
     setopt globdots
@@ -421,13 +409,13 @@ function spawn_cache_worker() {
 
     while :; do
         while read line; do
-            lockfile="$CACHE_DIR/${DOCROOT:gs/\//.}"
+            lockfile="$CACHE_DIR/${line:h:gs/\//.}"
             cache_file="${lockfile%.}.html"
             mklock $lockfile
 
             { rm $cache_file 2>/dev/null } always { rmdir $lockfile }
             unset lockfile cache_file
-        done < <(${(z)MONITOR_CMD} $DOCROOT)
+        done < <(fswatch -r $DOCROOT)
     done) &
 }
 
@@ -439,7 +427,7 @@ function spawn_cache_worker() {
 function send_list() {
     local mtype="text/html"
 
-    if [[ $CACHE == 1 && ${1%/} == ${DOCROOT%/} ]]; then
+    if (( $CACHE == 1 )); then
         local lockfile="${CACHE_DIR}/${1:gs/\//.}"
         local cache_file="${lockfile%.}.html"
         mklock $lockfile
@@ -596,7 +584,7 @@ os_probe || error "Unsupported platform"
 # Set our default variables
 log_f "MAXCONN: ${MAX_CONN:=12}"
 log_f "PORT: ${PORT:=8080}"
-log_f "IP_REDIRECT: ${IP_REDIRECT:=$(${(e)ip_addr})}"
+log_f "IP_REDIRECT: ${IP_REDIRECT:=$(ip_addr)}"
 log_f "IP_ACCEPT: ${IP_ACCEPT:=[0-9*].[0-9*].[0-9*].[0-9*]}"
 log_f "HTTP_KEEP_ALIVE: ${HTTP_KEEP_ALIVE:=1}"
 log_f "INDEX_FILE: ${INDEX_FILE:=index.html}"
