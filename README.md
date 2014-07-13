@@ -49,7 +49,9 @@ The provided sample `main.conf` lists the variables that can be changed. Any add
 By default, czhttpd searches for `main.conf` in `~/.config/czhttpd/conf/`. An alternative config file can be specified with the commandline option `-c`.
 
 ### TODO:
-- [ ] Recursive caching (is there a better option than `wait_on`?)
+- [X] Recursive caching (is there a better option than `wait_on`?)
+- [ ] Live config reload
+- [ ] URL rewrite
 
 ---
 

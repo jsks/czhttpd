@@ -579,7 +579,6 @@ readonly LOG_FORMAT
 
 # Parse cli options and config file
 parse_args $*
-os_probe || error "Unsupported platform"
 
 # Set our default variables
 log_f "MAXCONN: ${MAX_CONN:=12}"
