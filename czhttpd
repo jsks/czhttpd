@@ -154,7 +154,7 @@ function parse_conf() {
     fi
 
     if [[ -n $LOG_DIR ]]; then
-        if [[ $LOG_DOR == "/dev/null" ]]; then
+        if [[ $LOG_DIR == "/dev/null" ]]; then
            exec {logfd}>/dev/null {errfd}>/dev/null
         elif [[ -d $LOG_DIR ]]; then
             exec {logfd}>>$LOG_DIR/access.log {errfd}>>$LOG_DIR/error.log
@@ -417,6 +417,8 @@ function spawn_cache_worker() {
             unset lockfile cache_file
         done < <(fswatch -r $DOCROOT)
     done) &
+
+    print $!
 }
 
 ### send_list - dynamically list directory contents
@@ -566,9 +568,21 @@ function TRAPCHLD() {
     done
 }
 
+function TRAPHUP() {
+    log_f "Reloading config"
+    if kill -0 $CACHE_WORKER_PID 2>/dev/null; then
+        kill -9 $CACHE_WORKER_PID
+    fi
+    ztcp -c
+
+    shift
+    source $SCRIPT
+}
+
 ### Main
 trap "cleanup 2>/dev/null; exit" INT KILL TERM
 
+readonly SCRIPT="$0:A"
 LOG_FORMAT=( '[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)]'
              '[pid: $sysparams[pid]]'
              '$client_ip'
@@ -629,11 +643,13 @@ http_listen
 
 # For communication with our child processes
 FIFO=$FIFO_DIR/czhttpd-$$.fifo
-mkfifo $FIFO 2>/dev/null || error "Can not create fifo, $FIFO"
+if [[ ! -p $FIFO ]]; then
+    mkfifo $FIFO 2>/dev/null || error "Can not create fifo, $FIFO"
+fi
 exec {fifofd}<>$FIFO
 
 # For monitoring when our cache becomes invalid
-(( $CACHE )) && { spawn_cache_worker || error "Failed to initialise cache_worker" }
+(( $CACHE )) && { CACHE_WORKER_PID=$(spawn_cache_worker) || error "Failed to initialise cache_worker" }
 
 while :; do
     # Use select to block until a child writes to fifo on exit
