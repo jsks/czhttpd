@@ -31,6 +31,8 @@ function compression_filter() {
             gzip_chunked_header
             gzip -$COMPRESS_LEVEL -c $1 | send_chunk
         fi
+
+        log_f "200"
     else
         __send $1
     fi
