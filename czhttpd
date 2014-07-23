@@ -151,17 +151,19 @@ function parse_conf() {
         . $1 || print "Could not source config file $1"
     fi
 
-    if [[ -n $LOG_DIR ]]; then
-        if [[ $LOG_DIR == "/dev/null" ]]; then
-           exec {logfd}>/dev/null {errfd}>/dev/null
-        elif [[ -d $LOG_DIR ]]; then
-            exec {logfd}>>$LOG_DIR/access.log {errfd}>>$LOG_DIR/error.log
+    if ! (($logfd + $errfd)); then
+        if [[ -n $LOG_DIR ]]; then
+            if [[ $LOG_DIR == "/dev/null" ]]; then
+                exec {logfd}>/dev/null {errfd}>/dev/null
+            elif [[ -d $LOG_DIR ]]; then
+                exec {logfd}>>$LOG_DIR/access.log {errfd}>>$LOG_DIR/error.log
+            else
+                error "Invalid log directory $LOG_DIR"
+            fi
         else
-            error "Invalid log directory $LOG_DIR"
+            print "Warning: LOG_DIR not set, output redirected to /dev/null"
+            exec {logfd}>/dev/null {errfd}>/dev/null
         fi
-    else
-        print "Warning: LOG_DIR not set, output redirected to /dev/null"
-        exec {logfd}>/dev/null {errfd}>/dev/null
     fi
 
     [[ -n $FIFO_DIR && ! -d $FIFO_DIR ]] && error "Invalid fifo directory $FIFO_DIR"
@@ -181,23 +183,17 @@ function parse_conf() {
 
 function parse_args() {
     local -A opts
-    local i
 
     zparseopts -K -D -A opts c: p: h v || error 2>/dev/null
 
     [[ -n ${(kM)opts:#-h} ]] && help
+    if [[ -n ${(kM)opts:#-v} ]]; then
+        ! (( $logfd + $errfd )) && exec {errfd}>&1 {logfd}>&1
+    fi
 
     [[ -n $opts[-c] && ! -f $opts[-c] ]] && error "Config file $opts[-c] does not exist"
     parse_conf ${opts[-c]:-~/.config/czhttpd/conf/main.conf}
-
-    for i in ${(k)opts}; do
-        case $i in
-            ("-v")
-                exec {errfd}>&1; exec {logfd}>&1;;
-            ("-p")
-                PORT=$opts[$i];;
-        esac
-    done
+    [[ -n $opts[-p] ]] && PORT=$opts[-p]
 
     if [[ -n $1 ]]; then
         [[ -e $1 ]] || error "$1 is not a valid directory or file."
@@ -625,7 +621,7 @@ function czhttpd_init() {
     # For communication with our child processes
     FIFO=$FIFO_DIR/czhttpd-$$.fifo
     [[ ! -p $FIFO ]] && { mkfifo $FIFO || error "Can not create fifo, $FIFO" }
-    exec {fifofd}<>$FIFO
+    ! (( $fifofd )) && exec {fifofd}<>$FIFO
 
     # For monitoring when our cache becomes invalid
     (( $CACHE )) && { CACHE_WORKER_PID=$(spawn_cache_worker) || error "Failed to initialise cache_worker" }
@@ -652,6 +648,8 @@ function czhttpd_main() {
         OLD_PORT=$PORT
         OLD_FIFO=$FIFO
         OLD_FIFO_FD=$fifofd
+        exec {logfd}>&- {errfd}>&-
+        fifofd=0; logfd=0; errfd=0
         czhttpd_init ${=ARGV}
 
         if [[ $OLD_FIFO != $FIFO ]]; then
@@ -667,8 +665,12 @@ function czhttpd_main() {
                 print "0" >&$fifofd ) &
             fi
         fi
+
+        exec {OLD_FIFO_FD}>&-
         unset OLD_FIFO OLD_FIFO_FD OLD_PIDS
 
+        # Must use replace with exec, otherwise interrupting
+        # ztcp -a will crash czhttpd.
         exec czhttpd_main
     }
 
@@ -684,7 +686,7 @@ function czhttpd_main() {
 
         ztcp -a $listenfd
 
-        ( trap "child_cleanup 2>/dev/null" KILL TERM EXIT; trap '' CHLD PIPE
+        ( trap "child_cleanup 2>/dev/null" KILL TERM EXIT; trap '' CHLD HUP PIPE
 
         function child_cleanup() {
             kill -9 $coproc_pid; ztcp -c
