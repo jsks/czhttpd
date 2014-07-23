@@ -20,6 +20,7 @@ The primary goal of this project was to write a web server using pure zsh. As su
 - UTF-8 support
 - Multiple concurrent connections
 - Primitive caching of root directory listing and compressed files
+- Live config reload
 - Module support for:
     - Gzip compression
     - Basic CGI/1.1 support
@@ -48,9 +49,17 @@ The provided sample `main.conf` lists the variables that can be changed. Any add
 
 By default, czhttpd searches for `main.conf` in `~/.config/czhttpd/conf/`. An alternative config file can be specified with the commandline option `-c`.
 
+##### Live Reload:
+czhttpd will automatically reload its configuration file and gracefully handle any changes and current open connections when the `HUP` signal is sent to the parent czhttpd pid. Ex:
+
+```
+kill -HUP <czhttpd pid>
+```
+
 ### TODO:
 - [X] Recursive caching (is there a better option than `wait_on`?)
 - [ ] Live config reload
+    - Requires much more testing
 - [ ] URL rewrite
 
 ---
