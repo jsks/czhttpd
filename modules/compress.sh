@@ -9,9 +9,10 @@
 : ${COMPRESS_CACHE_DIR:=/tmp/.czhttpd-$$}
 
 [[ ! -d $COMPRESS_CACHE_DIR ]] && mkdir $COMPRESS_CACHE_DIR
+function send() { compression_filter $* }
 
 function compression_filter() {
-    setopt multios null_glob
+    setopt null_glob
 
     if check_if_compression $1; then
         if [[ $COMPRESS_CACHE == "1" && -f $1 ]]; then
@@ -27,16 +28,11 @@ function compression_filter() {
                 gzip -$COMPRESS_LEVEL -c $1 > $cache_file | send_chunk
             fi
         else
-            if [[ -f $1 ]]; then
-                gzip_chunked_header
-                gzip -$COMPRESS_LEVEL -c $1 | send_chunk
-            else
-                gzip_chunked_header
-                gzip -$COMPRESS_LEVEL -c | send_chunk
-            fi
+            gzip_chunked_header
+            gzip -$COMPRESS_LEVEL -c $1 | send_chunk
         fi
     else
-        return 1
+        __send $1
     fi
 }
 

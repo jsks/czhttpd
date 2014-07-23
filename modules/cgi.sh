@@ -9,11 +9,13 @@
 typeset -a cgi_head cgi_body
 typeset cgi_status_code
 
+function file_handler() { cgi_handler $* }
+
 function cgi_handler() {
     if check_if_cgi $1; then
-        exec_cgi $1 || <&p >/dev/null
+        exec_cgi $1 || { <&p >/dev/null; return 1 }
     else
-        return 1
+        __file_handler $1
     fi
 }
 
@@ -71,7 +73,7 @@ function exec_cgi() {
 
     log_f ${cgi_status_code:-"200"}
     return_header ${cgi_status_code:-"200 Ok"} "Transfer-Encoding: chunked" $cgi_head[@]
-    send_chunk <&p
+    __send_chunk <&p
 
     if ! wait $pid; then
         log_err "executing cgi script $1 failed"
