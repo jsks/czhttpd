@@ -480,13 +480,13 @@ function srv() {
     if [[ -f ${pathname%/} ]]; then
         file_handler $pathname
     elif [[ -d $pathname ]]; then
-        if [[ -f $pathname/$INDEX_FILE ]]; then
+        if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
+            error_header 301 "http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
+            return
+        elif [[ -f $pathname/$INDEX_FILE ]]; then
             file_handler $pathname/$INDEX_FILE
         else
-            if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
-                error_header 301 "http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
-                return
-            elif [[ -r "$pathname" && -x "$pathname" ]]; then
+            if [[ -r "$pathname" && -x "$pathname" ]]; then
                 dir_handler "$pathname"
             else
                 error_header 403
