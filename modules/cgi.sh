@@ -9,13 +9,13 @@
 typeset -a cgi_head cgi_body
 typeset cgi_status_code
 
-function file_handler() { cgi_handler $* }
+function handler() { cgi_handler $* }
 
 function cgi_handler() {
     if check_if_cgi $1; then
         exec_cgi $1 || { <&p >/dev/null; return 1 }
     else
-        __file_handler $1
+        __handler $1
     fi
 }
 

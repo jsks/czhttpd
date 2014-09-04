@@ -42,6 +42,9 @@ integer logfd errfd fifofd
 typeset -A MTYPES
 typeset -a LOG_FORMAT
 
+readonly SCRIPT="$0"
+readonly ARGV="$*"
+
 # Internal function variables that need global scope
 typeset -A req_headers
 
@@ -206,14 +209,12 @@ function http_listen() {
     typeset -g listenfd
 
     if (( $PORT > 1024 )); then
-        if [[ $PORT != $OLD_PORT ]]; then
+        if [[ $PORT != ${$(ztcp -L)[(w)4]} || -z $listenfd ]]; then
             ztcp -c
             ztcp -l $PORT 2>/dev/null || error "Could not bind to port $PORT"
             print "Listening on $PORT"
             listenfd=$REPLY
         fi
-
-        unset OLD_PORT
     else
         error "Invalid port number, $PORT"
     fi
@@ -400,17 +401,21 @@ function spawn_cache_worker() {
     setopt globdots
 
     function worker_cleanup() {
+        kill -9 $coproc_pid
         for i in $CACHE_DIR/*(N); rm -fr $i
     }
 
-    while read line; do
+    coproc fswatch -r $DOCROOT
+    local coproc_pid=$!
+
+    while read -p line; do
         lockfile="$CACHE_DIR/${line:h:gs/\//.}"
         cache_file="${lockfile%.}.html"
         mklock $lockfile
 
         { rm $cache_file 2>/dev/null } always { rmdir $lockfile }
         unset lockfile cache_file
-    done < <(fswatch -r $DOCROOT) ) &
+    done) &
 }
 
 function send_file() {
@@ -446,27 +451,27 @@ function __send() {
     log_f "200"
 }
 
-function __file_handler() {
-    [[ -z $mtype ]] && local mtype=$(mime_type $1)
-    local fsize=$(stat -L +size $1)
+function __handler() {
+    if [[ -f $1 ]]; then
+        [[ -z $mtype ]] && local mtype=$(mime_type $1)
+        [[ -z $fsize ]] && local fsize=$(stat -L +size $1)
 
-    send $1
-}
-
-function __dir_handler() {
-    local mtype="text/html"
-
-    if (( $CACHE )); then
-        local lockfile="${CACHE_DIR}/${1:gs/\//.}"
-        local cache_file="${lockfile%.}.html"
-        mklock $lockfile
-
-        [[ ! -f $cache_file ]] && build_index $1 > $cache_file
-
-        cd $CACHE_DIR
-        { file_handler ${cache_file:t} } always { cd -; rmdir $lockfile }
+        send $1
     else
-        send < <(build_index $1)
+        local mtype="text/html"
+
+        if (( $CACHE )); then
+            local lockfile="${CACHE_DIR}/${1:gs/\//.}"
+            local cache_file="${lockfile%.}.html"
+            mklock $lockfile
+
+            [[ ! -f $cache_file ]] && build_index $1 > $cache_file
+
+            cd $CACHE_DIR
+            { handler ${cache_file:t} } always { cd -; rmdir $lockfile }
+        else
+            send < <(build_index $1)
+        fi
     fi
 }
 
@@ -478,16 +483,16 @@ function srv() {
     [[ $FOLLOW_SYMLINKS != "1" && -h ${pathname%/} ]] && { error_header 403; return }
 
     if [[ -f ${pathname%/} ]]; then
-        file_handler $pathname
+        handler $pathname
     elif [[ -d $pathname ]]; then
         if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
             error_header 301 "http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
             return
         elif [[ -f $pathname/$INDEX_FILE ]]; then
-            file_handler $pathname/$INDEX_FILE
+            handler $pathname/$INDEX_FILE
         else
             if [[ -r "$pathname" && -x "$pathname" ]]; then
-                dir_handler "$pathname"
+                handler "$pathname"
             else
                 error_header 403
             fi
@@ -496,6 +501,35 @@ function srv() {
         error_header 404
         return
     fi
+}
+
+function reload_state() {
+    if kill -0 $CACHE_WORKER_PID 2>/dev/null; then
+        kill -15 $CACHE_WORKER_PID 2>/dev/null
+    fi
+
+    OLD_FIFO=$FIFO
+    OLD_FIFO_FD=$fifofd
+    exec {logfd}>&- {errfd}>&-
+    fifofd=0; logfd=0; errfd=0
+    czhttpd_init ${=ARGV}
+
+    if [[ $OLD_FIFO != $FIFO ]]; then
+        rm $OLD_FIFO
+        OLD_PIDS=(${(SM)jobstates##<->})
+        if [[ -n $OLD_PIDS ]]; then
+            ( while sysread -i $OLD_FIFO_FD -o $fifofd; do
+                for i in $OLD_PIDS; do
+                    ! kill -0 $i 2>/dev/null && OLD_PIDS=(${OLD_PIDS[@]#i})
+                done
+                [[ -z $OLD_PIDS ]] && break
+            done
+            print "0" >&$fifofd ) &
+        fi
+    fi
+
+    exec {OLD_FIFO_FD}>&-
+    unset OLD_FIFO OLD_FIFO_FD OLD_PIDS
 }
 
 function cleanup() {
@@ -512,7 +546,6 @@ function cleanup() {
 
 #### Main
 function czhttpd_init() {
-    ARGV="$*"
     LOG_FORMAT=( '[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)]'
                  '[pid: $sysparams[pid]]'
                  '$client_ip'
@@ -521,12 +554,11 @@ function czhttpd_init() {
                  '$req_headers[version]' )
 
     # Parse cli options and config file
-    parse_args $*
+    parse_args ${=ARGV}
 
     # Default callback functions, allows modules to override how we handle requests
     ! typeset -f send >/dev/null && send() { __send $* }
-    ! typeset -f file_handler >/dev/null && file_handler() { __file_handler $* }
-    ! typeset -f dir_handler >/dev/null && dir_handler() { __dir_handler $* }
+    ! typeset -f handler >/dev/null && handler() { __handler $* }
 
     # Set our default variables
     log_f "MAXCONN: ${MAX_CONN:=12}"
@@ -598,39 +630,21 @@ function czhttpd_main() {
     }
 
     function TRAPHUP() {
-        log_f "Reloading..."
-
-        if kill -0 $CACHE_WORKER_PID 2>/dev/null; then
-            kill -15 $CACHE_WORKER_PID 2>/dev/null
-        fi
-
-        OLD_PORT=$PORT
-        OLD_FIFO=$FIFO
-        OLD_FIFO_FD=$fifofd
-        exec {logfd}>&- {errfd}>&-
-        fifofd=0; logfd=0; errfd=0
-        czhttpd_init ${=ARGV}
-
-        if [[ $OLD_FIFO != $FIFO ]]; then
-            rm $OLD_FIFO
-            OLD_PIDS=(${(SM)jobstates##<->})
-            if [[ -n $OLD_PIDS ]]; then
-                ( while sysread -i $OLD_FIFO_FD -o $fifofd; do
-                    for i in $OLD_PIDS; do
-                        ! kill -0 $i 2>/dev/null && OLD_PIDS=(${OLD_PIDS[@]#i})
-                    done
-                    [[ -z $OLD_PIDS ]] && break
-                done
-                print "0" >&$fifofd ) &
-            fi
-        fi
-
-        exec {OLD_FIFO_FD}>&-
-        unset OLD_FIFO OLD_FIFO_FD OLD_PIDS
+        log_f "Reloading config..."
+        reload_state
 
         # Must replace process with exec, otherwise interrupting
         # ztcp -a will crash czhttpd.
         exec czhttpd_main
+    }
+
+    function TRAPUSR1() {
+        log_f "Reloading program..."
+
+        () { exec {logfd}>&- {errfd}>&- {fifofd}>&-; source ./$SCRIPT ${=ARGV} } &!
+        #wait ${${(SM)jobstates##<->}#$CACHE_WORKER_PID}
+        log_f "Cleaning up old instance"
+        cleanup 2>/dev/null; exit
     }
 
     trap "cleanup 2>/dev/null; exit" INT KILL TERM
@@ -655,7 +669,7 @@ function czhttpd_main() {
 
         # Use coproc to filter stderr from `srv` and preserve proper pid
         # for logs.
-        coproc { while true; do; zselect -r 0 && <&0; done }
+        coproc while true; do; zselect -r 0 && <&0; done
         coproc_pid=$!
 
         while read ip_line; do
@@ -683,4 +697,4 @@ function czhttpd_main() {
     done
 }
 
-czhttpd_init $* && czhttpd_main
+czhttpd_init && czhttpd_main
