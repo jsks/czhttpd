@@ -65,17 +65,21 @@ function log_err() {
 }
 
 function timeout() {
-    local pid1 pid2
+    local pid1 pid2 pid_status
 
     function TRAPCHLD() {
         kill $pid1 $pid2 2>/dev/null
+        return 1
     }
 
     $1 &; pid1=$!
     sleep $2 &; pid2=$!
 
     wait $pid1
+    pid_status=$?
     kill $pid2 2>/dev/null
+
+    return $pid_status
 }
 
 ### mklock
@@ -401,7 +405,7 @@ function spawn_cache_worker() {
     setopt globdots
 
     function worker_cleanup() {
-        kill -9 $coproc_pid
+        kill -9 $coproc_pid 2>/dev/null
         for i in $CACHE_DIR/*(N); rm -fr $i
     }
 
@@ -440,7 +444,7 @@ function send_chunk() {
 }
 
 function __send() {
-    if [[ -f $1 ]]; then
+    if [[ -n $1 ]]; then
         return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $fsize"
         send_file $1
     else
@@ -482,12 +486,11 @@ function srv() {
     [[ $HIDDEN_FILES != "1" && ${pathname:t} == .* ]] && { error_header 403; return }
     [[ $FOLLOW_SYMLINKS != "1" && -h ${pathname%/} ]] && { error_header 403; return }
 
-    if [[ -f ${pathname%/} ]]; then
+    { if [[ -f $pathname ]]; then
         handler $pathname
     elif [[ -d $pathname ]]; then
         if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
             error_header 301 "http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
-            return
         elif [[ -f $pathname/$INDEX_FILE ]]; then
             handler $pathname/$INDEX_FILE
         else
@@ -499,8 +502,7 @@ function srv() {
         fi
     else
         error_header 404
-        return
-    fi
+    fi } always { [[ $? != 0 ]] && error_header 500 }
 }
 
 function reload_state() {
