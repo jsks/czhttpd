@@ -479,9 +479,9 @@ function __handler() {
     fi
 }
 
-function srv() {
+function __srv() {
     setopt err_return
-    local pathname="${DOCROOT}$(urldecode $req_headers[url])"
+    local pathname="${DOCROOT}$(urldecode ${1:-req_headers[url]})"
 
     [[ $HIDDEN_FILES != "1" && ${pathname:t} == .* ]] && { error_header 403; return }
     [[ $FOLLOW_SYMLINKS != "1" && -h ${pathname%/} ]] && { error_header 403; return }
@@ -561,6 +561,7 @@ function czhttpd_init() {
     # Default callback functions, allows modules to override how we handle requests
     ! typeset -f send >/dev/null && send() { __send $* }
     ! typeset -f handler >/dev/null && handler() { __handler $* }
+    ! typeset -f srv >/dev/null && srv() { __srv $* }
 
     # Set our default variables
     log_f "MAXCONN: ${MAX_CONN:=12}"

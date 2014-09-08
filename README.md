@@ -26,6 +26,7 @@ The primary goal of this project was to write a web server using pure zsh. As su
     - Gzip compression
     - Basic CGI/1.1 support
         - phpMyAdmin appears fully functional, and partially Wordpress (requires configuring for an alternative port)
+    - Basic url rewrite
 
 ### Optional Dependencies:
 - Fallback mime-type support:
@@ -46,7 +47,7 @@ If no file or directory is given, czhttpd defaults to serving the current direct
 ```
 
 ### Configuration:
-The provided sample `main.conf` lists the variables that can be changed. Any additional files or modules can be sourced using the standard shell command, `source`. Currently, there are only two modules, `cgi.sh` and `compress.sh`. Their description and use should be listed in the respective `cgi.conf` and `compress.conf` config files.
+The provided sample `main.conf` lists the variables that can be changed. Any additional files or modules can be sourced using the standard shell command, `source`. Currently, there are only three modules, `cgi.sh`, `compress.sh`, `url_rewrite.sh`. Their description and use should be listed in the respective `cgi.conf`, `compress.conf`, and `url_rewrite.conf` config files.
 
 By default, czhttpd searches for `main.conf` in `~/.config/czhttpd/conf/`. An alternative config file can be specified with the commandline option `-c`.
 
@@ -65,7 +66,7 @@ kill -USR1 <czhttpd pid>
 ```
 
 ### TODO:
-- [ ] URL rewrite
+- [X] URL rewrite
 - [ ] Cont. testing live config/"binary" reload (haven't had much time to play around with it)
     - [ ] Gracefully close old connections
 
