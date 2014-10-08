@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/usr/local/bin/zsh
 ### czhttpd
 # zsh web server
 # Author: jsks
@@ -72,7 +72,7 @@ function timeout() {
         return 1
     }
 
-    $1 &; pid1=$!
+    ${(z)1} &; pid1=$!
     sleep $2 &; pid2=$!
 
     wait $pid1
@@ -512,7 +512,7 @@ function reload_state() {
 
     OLD_FIFO=$FIFO
     OLD_FIFO_FD=$fifofd
-    exec {logfd}>&- {errfd}>&-
+    exec {logfd}>&- {errfd}>&- {fifofd}>&-
     fifofd=0; logfd=0; errfd=0
     czhttpd_init ${=ARGV}
 
@@ -537,7 +537,7 @@ function reload_state() {
 function cleanup() {
     setopt noerrreturn
     for i in ${(SM)jobstates##<->}; do
-        kill -15 $i
+        kill -15 $i 2>/dev/null
     done
 
     log_f "> Exiting main"
@@ -643,10 +643,19 @@ function czhttpd_main() {
 
     function TRAPUSR1() {
         log_f "Reloading program..."
+        local -a old_pids
+        local timer_pid
 
         () { exec {logfd}>&- {errfd}>&- {fifofd}>&-; source ./$SCRIPT ${=ARGV} } &!
-        #wait ${${(SM)jobstates##<->}#$CACHE_WORKER_PID}
-        log_f "Cleaning up old instance"
+
+        { sleep 300; kill $$ } &
+        timer_pid=$!
+
+        for i in ${(SM)jobstates##<->}; do
+            [[ $i != $CACHE_WORKER_PID && $i != $timer_pid ]] && old_pids+=$i
+        done
+        wait $old_pids 2>/dev/null
+
         cleanup 2>/dev/null; exit
     }
 
