@@ -14,8 +14,7 @@ function compression_init() {
     [[ $COMPRESS_MIN_SIZE != <-> ]] && { log_err "Invalid integer for COMPRESS_MIN_SIZE"; return 1 }
     [[ $COMPRESS_CACHE != [01] ]] && { log_err "Invalid integer for COMPRESS_CACHE"; return 1}
 
-    ! typeset -f send_file >/dev/null && function send_file() { compression_filter $* }
-    ! typeset -f send_chunk >/dev/null && function send_chunk() { compression_filter }
+    ! typeset -f send >/dev/null && function send() { compression_filter $* }
 }
 
 function compression_filter() {
@@ -24,24 +23,26 @@ function compression_filter() {
     if check_if_compression $1; then
         if [[ $COMPRESS_CACHE == "1" && -f $1 ]]; then
             local mod_time="$(mtime $1)"
-            local cache_file="$COMPRESS_CACHE_DIR/${1:gs/\//.}-${mod_time//[- :]/}.gz"
+            local cache_file="$COMPRESS_CACHE_DIR/${1:gs/\//}-${mod_time//[- :]/}.gz"
 
             if [[ -f $cache_file ]]; then
                 gzip_fixed_header $(stat -L +size $cache_file)
                 send_file $cache_file
             else
                 rm $COMPRESS_CACHE_DIR/${1:gs/\//.}-*.gz 2>/dev/null || :
-                gzip_chunked_header
-                gzip -$COMPRESS_LEVEL -c $1 > $cache_file | send_chunk
+                gzip -$COMPRESS_LEVEL -c $1 > $cache_file
+
+                gzip_fixed_header $(stat -L +size $cache_file)
+                send_file $cache_file
             fi
         else
             gzip_chunked_header
-            gzip -$COMPRESS_LEVEL -c $1 | __send_chunk
+            gzip -$COMPRESS_LEVEL -c $1 | send_chunk
         fi
 
         log_f "200"
     else
-        __send_file $1
+        __send $1
     fi
 }
 

@@ -73,7 +73,7 @@ function exec_cgi() {
 
     log_f ${cgi_status_code:-"200"}
     return_header ${cgi_status_code:-"200 Ok"} "Transfer-Encoding: chunked" $cgi_head[@]
-    __send_chunk <&p
+    send_chunk <&p
 
     if ! wait $pid; then
         log_err "executing cgi script $1 failed"
