@@ -18,11 +18,12 @@ done
 export PATH=/sbin:/bin:/usr/bin:/usr/local/bin
 
 # Load Modules
-zmodload zsh/net/tcp
-zmodload zsh/files
-zmodload zsh/stat
 zmodload zsh/datetime
+zmodload zsh/files
+zmodload zsh/parameter
+zmodload zsh/stat
 zmodload zsh/system
+zmodload zsh/net/tcp
 zmodload zsh/zselect
 
 ### zsh options
@@ -33,7 +34,7 @@ zmodload zsh/zselect
 # set:
 #   posix_jobs - for handling jobs in communicating parent<-child
 #   bare_glob_qual - required for our patterns in `list_dir`
-unsetopt multibyte glob_dots err_return
+unsetopt multibyte glob_dots err_return multios
 setopt posix_jobs bare_glob_qual local_options
 
 # Declare variable types
@@ -44,6 +45,9 @@ typeset -a LOG_FORMAT
 
 readonly SCRIPT="$0"
 readonly ARGV="$*"
+
+# Let's save some typing by using pseudo lazy evaluation
+readonly jobids='${(SM)jobstates##<->}'
 
 # Internal function variables that need global scope
 typeset -A req_headers
@@ -157,8 +161,7 @@ function parse_conf() {
         . $1 || print "Could not source config file $1"
     fi
 
-    # If unset `logfd, errfd = 0`
-    if ! (( $logfd + $errfd )); then
+    if [[ ! -t $logfd || ! -t $errfd ]] && (( $LOG )); then
         if [[ -n $LOG_DIR ]]; then
             if [[ $LOG_DIR == "/dev/null" ]]; then
                 exec {logfd}>/dev/null {errfd}>/dev/null
@@ -481,7 +484,7 @@ function __handler() {
 
 function __srv() {
     setopt err_return
-    local pathname="${DOCROOT}$(urldecode ${1:-req_headers[url]})"
+    local pathname="${DOCROOT}$(urldecode ${1:-$req_headers[url]})"
 
     [[ $HIDDEN_FILES != "1" && ${pathname:t} == .* ]] && { error_header 403; return }
     [[ $FOLLOW_SYMLINKS != "1" && -h ${pathname%/} ]] && { error_header 403; return }
@@ -506,19 +509,16 @@ function __srv() {
 }
 
 function reload_state() {
-    if kill -0 $CACHE_WORKER_PID 2>/dev/null; then
-        kill -15 $CACHE_WORKER_PID 2>/dev/null
-    fi
+    (( $CACHE )) && kill -15 $CACHE_WORKER_PID 2>/dev/null
 
     OLD_FIFO=$FIFO
     OLD_FIFO_FD=$fifofd
-    exec {logfd}>&- {errfd}>&- {fifofd}>&-
-    fifofd=0; logfd=0; errfd=0
+    exec {logfd}>&- {errfd}>&-
     czhttpd_init ${=ARGV}
 
     if [[ $OLD_FIFO != $FIFO ]]; then
         rm $OLD_FIFO
-        OLD_PIDS=(${(SM)jobstates##<->})
+        OLD_PIDS=(${(e@)jobids})
         if [[ -n $OLD_PIDS ]]; then
             ( while sysread -i $OLD_FIFO_FD -o $fifofd; do
                 for i in $OLD_PIDS; do
@@ -536,9 +536,7 @@ function reload_state() {
 
 function cleanup() {
     setopt noerrreturn
-    for i in ${(SM)jobstates##<->}; do
-        kill -15 $i 2>/dev/null
-    done
+    kill -15 ${(e)jobids} 2>/dev/null
 
     log_f "> Exiting main"
     exec {logfd}>&- {errfd}>&- {fifofd}>&-
@@ -549,7 +547,7 @@ function cleanup() {
 #### Main
 function czhttpd_init() {
     LOG_FORMAT=( '[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)]'
-                 '[pid: $sysparams[pid]]'
+                 '[pid: ${PID:-$sysparams[pid]}]'
                  '$client_ip'
                  '$req_headers[method]'
                  '$req_headers[url]'
@@ -651,10 +649,7 @@ function czhttpd_main() {
         { sleep 300; kill $$ } &
         timer_pid=$!
 
-        for i in ${(SM)jobstates##<->}; do
-            [[ $i != $CACHE_WORKER_PID && $i != $timer_pid ]] && old_pids+=$i
-        done
-        wait $old_pids 2>/dev/null
+        wait ${${(e)jobids}#($timer_pid|$CACHE_WORKER_PID)} 2>/dev/null
 
         cleanup 2>/dev/null; exit
     }
@@ -671,18 +666,11 @@ function czhttpd_main() {
 
         ztcp -a $listenfd
 
-        ( trap "child_cleanup 2>/dev/null" KILL TERM EXIT; trap '' PIPE; trap - HUP
-        function child_cleanup() {
-            kill -9 $coproc_pid; ztcp -c
-            print "0" >&$fifofd
-        }
+        ( trap "child_cleanup" KILL TERM EXIT; trap '' PIPE; trap - HUP
+        function child_cleanup() { ztcp -c; print "0" >&$fifofd; exit }
 
         fd=$REPLY
-
-        # Use coproc to filter stderr from `srv` and preserve proper pid
-        # for logs.
-        coproc while true; do; zselect -r 0 && <&0; done
-        coproc_pid=$!
+        PID=$sysparams[pid]
 
         while read ip_line; do
             [[ $ip_line[3] == "I" ]] && { local client_ip=${ip_line[(ws. .)3]}; break }
@@ -694,14 +682,12 @@ function czhttpd_main() {
         fi
 
         while parse_request && check_request; do
-            srv 1>&$fd 2>&p
+            srv 2>&1 >&$fd | sysread buff
+            lstatus=$pipestatus[1]
 
-            if [[ $? != 0 ]]; then
-                sysread errbuff <&p && log_err "${(M)errbuff##*[[:alnum:]]}"
-                log_err "closing socket"
-                break
-            fi
+            [[ -n $buff ]] && { log_err "${(M)buff##*[[:alnum:]]}"; unset buff } 
 
+            [[ $lstatus != 0 ]] && { log_err "broken socket, closing"; break}
             [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
         done ) &
 
