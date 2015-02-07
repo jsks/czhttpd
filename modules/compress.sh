@@ -8,8 +8,15 @@
 : ${COMPRESS_CACHE:=1}
 : ${COMPRESS_CACHE_DIR:=/tmp/.czhttpd-$$}
 
-[[ ! -d $COMPRESS_CACHE_DIR ]] && mkdir $COMPRESS_CACHE_DIR
-function send() { compression_filter $* }
+function compression_init() {
+    [[ ! -d $COMPRESS_CACHE_DIR ]] && mkdir $COMPRESS_CACHE_DIR
+    [[ $COMPRESS_LEVEL != <-> ]] && { log_err "Invalid integer for COMPRESS_LEVEL"; return 1 }
+    [[ $COMPRESS_MIN_SIZE != <-> ]] && { log_err "Invalid integer for COMPRESS_MIN_SIZE"; return 1 }
+    [[ $COMPRESS_CACHE != [01] ]] && { log_err "Invalid integer for COMPRESS_CACHE"; return 1}
+
+    ! typeset -f send_file >/dev/null && function send_file() { compression_filter $* }
+    ! typeset -f send_chunk >/dev/null && function send_chunk() { compression_filter }
+}
 
 function compression_filter() {
     setopt null_glob
@@ -29,12 +36,12 @@ function compression_filter() {
             fi
         else
             gzip_chunked_header
-            gzip -$COMPRESS_LEVEL -c $1 | send_chunk
+            gzip -$COMPRESS_LEVEL -c $1 | __send_chunk
         fi
 
         log_f "200"
     else
-        __send $1
+        __send_file $1
     fi
 }
 
@@ -49,9 +56,6 @@ function gzip_fixed_header() {
 function check_if_compression() {
     [[ -z ${(SM)req_headers[accept-encoding]#gzip} || $COMPRESS == 0 ]] && return 1
 
-    [[ $COMPRESS_LEVEL != <-> ]] && { log_err "Invalid integer for COMPRESS_LEVEL"; return 1 }
-    [[ $COMPRESS_MIN_SIZE != <-> ]] && { log_err "Invalid integer for COMPRESS_MIN_SIZE"; return 1 }
-    [[ $COMPRESS_CACHE != [01] ]] && { log_err "Invalid integer for COMPRESS_CACHE"; return 1}
     [[ ! -d $COMPRESS_CACHE_DIR ]] && { log_err "Compression cache directory does not exist"; return 1}
 
     if [[ -f $1 ]]; then
@@ -64,3 +68,5 @@ function check_if_compression() {
 
     return 0
 }
+
+compression_init

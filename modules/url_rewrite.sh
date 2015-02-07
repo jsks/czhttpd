@@ -2,7 +2,7 @@
 
 : ${URL_REWRITE:=1}
 zmodload zsh/pcre
-function srv() { url_rewrite $* }
+! typeset -f srv >/dev/null && function srv() { url_rewrite $* }
 
 function url_rewrite() {
     if [[ $URL_REWRITE == 1 ]]; then

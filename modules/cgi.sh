@@ -9,7 +9,7 @@
 typeset -a cgi_head cgi_body
 typeset cgi_status_code
 
-function handler() { cgi_handler $* }
+! typeset -f handler >/dev/null && function handler() { cgi_handler $* }
 
 function cgi_handler() {
     if check_if_cgi $1; then

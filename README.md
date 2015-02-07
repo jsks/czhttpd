@@ -11,7 +11,7 @@ The primary goal of this project was to write a web server using pure zsh. As su
 <br>
 **So why write it?** Because it's fun, and I have found use for czhttpd in quickly serving files on a local network and testing web pages.
 
-### Features:
+### Features
 *Tested on Linux and OS X. {Free,Net,Open}BSD should work; however, they are completely untested.*
 
 - Basic support for HTTP/1.1
@@ -28,13 +28,13 @@ The primary goal of this project was to write a web server using pure zsh. As su
         - phpMyAdmin appears fully functional, and partially Wordpress (requires configuring for an alternative port)
     - Basic url rewrite
 
-### Optional Dependencies:
+### Optional Dependencies
 - Fallback mime-type support:
     - `file`
 - Directory caching:
     - `fswatch`
 
-### Usage:
+### Usage
 ```
 czhttpd [OPTIONS] <file or dir>
 - Options
@@ -46,26 +46,26 @@ czhttpd [OPTIONS] <file or dir>
 If no file or directory is given, czhttpd defaults to serving the current directory
 ```
 
-### Configuration:
+### Configuration
 The provided sample `main.conf` lists the variables that can be changed. Any additional files or modules can be sourced using the standard shell command, `source`. Currently, there are only three modules: `cgi.sh`; `compress.sh`; `url_rewrite.sh`. Their description and use should be listed in the respective `cgi.conf`, `compress.conf`, and `url_rewrite.conf` config files.
 
 By default, czhttpd searches for `main.conf` in `~/.config/czhttpd/conf/`. An alternative config file can be specified with the commandline option `-c`.
 
-#### Live Reload:
+#### Live Reload
 czhttpd will automatically reload its configuration file and gracefully handle any changes and current open connections when the `HUP` signal is sent to the parent czhttpd pid. Ex:
 
 ```
 kill -HUP <czhttpd pid>
 ```
 
-#### Live Program Update:
+#### Live Program Update
 czhttpd can also replace the root process with another (eg updated) version of itself. Ex:
 
 ```
 kill -USR1 <czhttpd pid>
 ```
 
-### TODO:
+### TODO
 - [X] URL rewrite
 - [ ] Cont. testing live config/"binary" reload (haven't had much time to play around with it)
     - [ ] Gracefully close old connections

@@ -46,9 +46,6 @@ typeset -a LOG_FORMAT
 readonly SCRIPT="$0"
 readonly ARGV="$*"
 
-# Let's save some typing by using pseudo lazy evaluation
-readonly jobids='${(SM)jobstates##<->}'
-
 # Internal function variables that need global scope
 typeset -A req_headers
 
@@ -425,13 +422,13 @@ function spawn_cache_worker() {
     done) &
 }
 
-function send_file() {
+function __send_file() {
     if [[ $req_headers[method] != "HEAD" ]]; then
         <$1
     fi
 }
 
-function send_chunk() {
+function __send_chunk() {
     if [[ $req_headers[method] != "HEAD" ]]; then
         local buff
 
@@ -446,24 +443,14 @@ function send_chunk() {
     fi
 }
 
-function __send() {
-    if [[ -n $1 ]]; then
-        return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $fsize"
-        send_file $1
-    else
-        return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Transfer-Encoding: chunked"
-        send_chunk
-    fi
-
-    log_f "200"
-}
-
 function __handler() {
     if [[ -f $1 ]]; then
         [[ -z $mtype ]] && local mtype=$(mime_type $1)
         [[ -z $fsize ]] && local fsize=$(stat -L +size $1)
 
-        send $1
+        return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $fsize"
+        send_file $1
+
     else
         local mtype="text/html"
 
@@ -477,9 +464,13 @@ function __handler() {
             cd $CACHE_DIR
             { handler ${cache_file:t} } always { cd -; rmdir $lockfile }
         else
-            send < <(build_index $1)
+            return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Transfer-Encoding: chunked"
+
+            send_chunk < <(build_index $1)
         fi
     fi
+
+    log_f "200"
 }
 
 function __srv() {
@@ -518,7 +509,7 @@ function reload_state() {
 
     if [[ $OLD_FIFO != $FIFO ]]; then
         rm $OLD_FIFO
-        OLD_PIDS=(${(e@)jobids})
+        OLD_PIDS=(${(SM)jobstates##<->})
         if [[ -n $OLD_PIDS ]]; then
             ( while sysread -i $OLD_FIFO_FD -o $fifofd; do
                 for i in $OLD_PIDS; do
@@ -536,7 +527,7 @@ function reload_state() {
 
 function cleanup() {
     setopt noerrreturn
-    kill -15 ${(e)jobids} 2>/dev/null
+    kill -15 ${(SM)jobstates##<->} 2>/dev/null
 
     log_f "> Exiting main"
     exec {logfd}>&- {errfd}>&- {fifofd}>&-
@@ -557,9 +548,11 @@ function czhttpd_init() {
     parse_args ${=ARGV}
 
     # Default callback functions, allows modules to override how we handle requests
-    ! typeset -f send >/dev/null && send() { __send $* }
-    ! typeset -f handler >/dev/null && handler() { __handler $* }
-    ! typeset -f srv >/dev/null && srv() { __srv $* }
+    # Can't be simple aliases since shell won't find the cmd
+    ! typeset -f send_file >/dev/null && function send_file() { __send_file $* }
+    ! typeset -f send_chunk >/dev/null && function send_chunk() { __send_chunk }
+    ! typeset -f handler >/dev/null && function handler() { __handler $* }
+    ! typeset -f srv >/dev/null && function srv() { __srv $* }
 
     # Set our default variables
     log_f "MAXCONN: ${MAX_CONN:=12}"
@@ -641,15 +634,13 @@ function czhttpd_main() {
 
     function TRAPUSR1() {
         log_f "Reloading program..."
-        local -a old_pids
         local timer_pid
 
         () { exec {logfd}>&- {errfd}>&- {fifofd}>&-; source ./$SCRIPT ${=ARGV} } &!
 
-        { sleep 300; kill $$ } &
+        { sleep 300; kill -15 $$ } &
         timer_pid=$!
-
-        wait ${${(e)jobids}#($timer_pid|$CACHE_WORKER_PID)} 2>/dev/null
+        wait ${jobstates//([^[:digit:]]|$timer_pid|$CACHE_WORKER_PID)/} 2>/dev/null
 
         cleanup 2>/dev/null; exit
     }
@@ -685,9 +676,9 @@ function czhttpd_main() {
             srv 2>&1 >&$fd | sysread buff
             lstatus=$pipestatus[1]
 
-            [[ -n $buff ]] && { log_err "${(M)buff##*[[:alnum:]]}"; unset buff } 
+            [[ -n $buff ]] && { log_err "${(f)buff}"; unset buff }
 
-            [[ $lstatus != 0 ]] && { log_err "broken socket, closing"; break}
+            [[ $lstatus != 0 ]] && { log_err "closing connection"; break}
             [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
         done ) &
 
