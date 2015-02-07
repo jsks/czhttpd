@@ -113,6 +113,7 @@ fi
 
 # Functions
 function error() {
+    setopt multios
     print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] Fatal Error: $*" >&2 >&$errfd
 
     cleanup 2>/dev/null
@@ -462,7 +463,7 @@ function __send() {
         return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $fsize"
         send_file $1
     else
-        return "200 Ok" "Content-type: text/html; charset=UTF-8" "Transfer-Encoding: chunked"
+        return_header "200 Ok" "Content-type: text/html; charset=UTF-8" "Transfer-Encoding: chunked"
         send_chunk
     fi
 
@@ -478,12 +479,10 @@ function __handler() {
     else
         if (( $CACHE )); then
             local cache_file="${CACHE_DIR}/${1//\//}.html"
-            [[ ! -f $cache_file ]] && : > $cache_file
+            : >> $cache_file
             mklock $cache_file
 
-            if [[ ! -s $cache_file ]]; then
-                build_index $1 > $cache_file
-            fi
+            [[ ! -s $cache_file ]] && build_index $1 > $cache_file
 
             cd $CACHE_DIR
             { handler ${cache_file:t} } always { cd -; rmlock }
