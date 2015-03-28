@@ -1,4 +1,4 @@
-#!/usr/local/bin/zsh
+#!/usr/bin/zsh
 ### czhttpd
 # zsh web server
 # Author: jsks
@@ -31,13 +31,16 @@ zmodload zsh/zselect
 #   multibyte - to accurately get length of utf8 strings
 #   glob_dots - prevent iterating through dot files automatically
 #   err_return - set only within `srv` to handle errors at highest level
+#   multios - prevent redirecting file descriptor more than once (srv)
 # set:
-#   posix_jobs - for handling jobs in communicating parent<-child
+#   posix_jobs - for handling jobs in communicating child->parent
 #   bare_glob_qual - required for our patterns in `list_dir`
+#   local_options - selectively turn on multios & err_return
+#   local_traps - restore traps after exiting f()
 unsetopt multibyte glob_dots err_return multios
-setopt posix_jobs bare_glob_qual local_options
+setopt posix_jobs bare_glob_qual local_options local_traps
 
-# Declare variable types
+# Declare variable types; assignment for global vars in init f()
 integer logfd errfd fifofd
 
 typeset -A MTYPES
@@ -45,9 +48,6 @@ typeset -a LOG_FORMAT
 
 readonly SCRIPT="$0"
 readonly ARGV="$*"
-
-# Internal function variables that need global scope
-typeset -A req_headers
 
 #### Platform specific code
 case $OSTYPE in
@@ -87,10 +87,9 @@ case $OSTYPE in
         };;
 esac
 
-# TODO: implement timeout
 if zsystem supports flock; then
     function mklock() {
-        zsystem flock -f LOCK $1
+        zsystem flock -t $LOCK_TIMEOUT -f LOCK $1
     }
 
     function rmlock() {
@@ -100,8 +99,15 @@ if zsystem supports flock; then
 else
     function mklock() {
         typeset -g LOCK=${1}.lock
+        local timer_pid
+
+        sleep $LOCK_TIMEOUT &
+        timer_pid=$!
+
         while ! mkdir $LOCK 2>/dev/null; do
-            continue
+            if ! kill -0 $timer_pid 2>/dev/null; then
+                return 1
+            fi
         done
     }
 
@@ -340,6 +346,7 @@ function mime_type() {
     [[ -h "${1%/}" ]] && print -n "symbolic link->"
 
     [[ -d "$1" ]] && { print "Directory"; return }
+
     local file_tail mtype
 
     file_tail="${(L)1:t}"
@@ -409,11 +416,12 @@ function build_index() {
 function spawn_cache_worker() {
     setopt noerrreturn
 
-    mkdir $CACHE_DIR 2>/dev/null
     if ! whence fswatch >/dev/null; then
         log_err "Can't find fswatch"
         return 1
     fi
+
+    mkdir $CACHE_DIR 2>/dev/null
 
     (trap "worker_cleanup; exit" KILL TERM
     setopt globdots
@@ -423,8 +431,10 @@ function spawn_cache_worker() {
         for i in $CACHE_DIR/*(N); rm -fr $i
     }
 
+    local coproc_pid cache_file
+
     coproc fswatch -r $DOCROOT
-    local coproc_pid=$!
+    coproc_pid=$!
 
     while read -p line; do
         cache_file="${CACHE_DIR}/${line:h:gs/\//}.html"
@@ -472,8 +482,10 @@ function __send() {
 
 function __handler() {
     if [[ -f $1 ]]; then
-        [[ -z $mtype ]] && local mtype=$(mime_type $1)
-        [[ -z $fsize ]] && local fsize=$(stat -L +size $1)
+        local mtype fsize
+
+        [[ -z $mtype ]] && mtype=$(mime_type $1)
+        [[ -z $fsize ]] && fsize=$(stat -L +size $1)
 
         send $1
     else
@@ -519,33 +531,38 @@ function __srv() {
 }
 
 function reload_state() {
-    (( $CACHE )) && kill -15 $CACHE_WORKER_PID 2>/dev/null
+    [[ $CACHE == 1 ]] && kill -15 $CACHE_WORKER_PID 2>/dev/null
 
-    OLD_FIFO=$FIFO
-    OLD_FIFO_FD=$fifofd
+    local old_fifo old_fifo_fd old_pids
+
+    old_fifo=$FIFO
+    old_fifo_fd=$fifofd
+
     exec {logfd}>&- {errfd}>&-
     czhttpd_init ${=ARGV}
 
-    if [[ $OLD_FIFO != $FIFO ]]; then
-        rm $OLD_FIFO
-        OLD_PIDS=(${(SM)jobstates##<->})
-        if [[ -n $OLD_PIDS ]]; then
-            ( while sysread -i $OLD_FIFO_FD -o $fifofd; do
-                for i in $OLD_PIDS; do
-                    ! kill -0 $i 2>/dev/null && OLD_PIDS=(${OLD_PIDS[@]#i})
+    if [[ $old_fifo != $FIFO ]]; then
+        rm $old_fifo
+        old_pids=(${(SM)jobstates##<->})
+        if [[ -n $old_pids ]]; then
+            ( while sysread -i $old_fifo_fd -o $fifofd; do
+                for i in $old_pids; do
+                    ! kill -0 $i 2>/dev/null && OLD_PIDS=(${old_pids[@]#i})
                 done
-                [[ -z $OLD_PIDS ]] && break
+
+                [[ -z $old_pids ]] && break
             done
             print "0" >&$fifofd ) &
         fi
     fi
 
-    exec {OLD_FIFO_FD}>&-
-    unset OLD_FIFO OLD_FIFO_FD OLD_PIDS
+    exec {old_fifo_fd}>&-
+    unset old_fifo old_fifo_fd old_pids
 }
 
 function cleanup() {
     setopt noerrreturn
+
     kill -15 ${(SM)jobstates##<->} 2>/dev/null
 
     log_f "> Exiting main"
@@ -587,11 +604,14 @@ function czhttpd_init() {
     log_f "LOG_DIR: ${LOG_DIR:=/dev/null}"
     log_f "FIFO_DIR: ${FIFO_DIR:=/tmp}"
 
-    readonly SERVER_NAME="$IP_REDIRECT"
-    readonly SERVER_ADDR="$SERVER_NAME"
-    readonly SERVER_SOFTWARE="czhttpd/$(printf '%.1f\n' "$((RANDOM/10000.0))")b"
-    readonly SERVER_PROTOCOL="HTTP/1.1"
-    readonly GATEWAY_INTERFACE="CGI/1.1"
+    # readonly vars that should not be modified by anything except this f()
+    typeset +r -g SERVER_NAME="$IP_REDIRECT"
+    typeset +r -g SERVER_ADDR="$SERVER_NAME"
+    typeset +r -g SERVER_SOFTWARE="czhttpd/$(printf '%.1f\n' "$((RANDOM/10000.0))")b"
+    typeset +r -g SERVER_PROTOCOL="HTTP/1.1"
+    typeset +r -g GATEWAY_INTERFACE="CGI/1.1"
+    typeset +r -g LOCK_TIMEOUT=30
+    typeset -r -g SERVER_NAME SERVER_ADDR SERVER_SOFTWARE SERVER_PROTOCOL GATEWAY_INTERFACE LOCK_TIMEOUT
 
     if [[ -z $MTYPES ]]; then
         MTYPES=( pdf       application/pdf
@@ -641,24 +661,25 @@ function czhttpd_main() {
         done
     }
 
+    # Upon receiving `HUP`, reload configuration
     function TRAPHUP() {
         log_f "Reloading config..."
         reload_state
-
-        # Must replace process with exec, otherwise interrupting
-        # ztcp -a will crash czhttpd.
-        exec czhttpd_main
     }
 
+    # Upon receiving `USR1`, spawn a new instance and gracefully wait
+    # to terminate the old one
     function TRAPUSR1() {
         log_f "Reloading program..."
         local timer_pid
 
-        () { exec {logfd}>&- {errfd}>&- {fifofd}>&-; source ./$SCRIPT ${=ARGV} } &!
+        (exec {logfd}>&- {errfd}>&- {fifofd}>&-; source ./$SCRIPT ${=ARGV}) &!
 
-        { sleep 300; kill -15 $$ } &
+        { sleep 3; kill -15 $$ } &
         timer_pid=$!
+
         wait ${jobstates//([^[:digit:]]|$timer_pid|$CACHE_WORKER_PID)/} 2>/dev/null
+        kill -9 $timer_pid 2>/dev/null
 
         cleanup 2>/dev/null; exit
     }
@@ -673,12 +694,18 @@ function czhttpd_main() {
             zselect -r $fifofd && break
         done
 
-        ztcp -a $listenfd
+        # Use select to block since interrupting `ztcp -a` crashes our program
+        zselect -r $listenfd
+        ztcp -t -a $listenfd
 
-        ( trap "child_cleanup" KILL TERM EXIT; trap '' PIPE; trap - HUP
+        ( trap "child_cleanup" KILL TERM EXIT; trap '' PIPE; trap - HUP USR1 CHLD
         function child_cleanup() { ztcp -c; print "0" >&$fifofd; exit }
 
+        local lstatus fd PID
+
         fd=$REPLY
+
+        # Explicitly save pid so that `srv` logs the same pid even though it is run in subshell
         PID=$sysparams[pid]
 
         while read ip_line; do
