@@ -1,15 +1,33 @@
-# Module to handle cgi scripts
+### Module to handle cgi scripts
+# Fair warning: This module isn't that interesting/useful to me
+# so it tends to go untested during updates. But it should work.
+# Maybe. Hopefully.
 
 # Declare our default variables
 : ${CGI_ENABLE:=1}
 : ${CGI_EXTS:="php"}
 : ${CGI_TIMEOUT=300}
 
-# Declare internal function variables that need global scope
-typeset -a cgi_head cgi_body
-typeset cgi_status_code
-
 ! typeset -f handler >/dev/null && function handler() { cgi_handler $* }
+
+function timeout() {
+    local pid1 pid2 pid_status
+
+    function TRAPCHLD() {
+        kill $pid1 $pid2 2>/dev/null
+        return 1
+    }
+
+    ${(z)1} &; pid1=$!
+    sleep $2 &; pid2=$!
+
+    wait $pid1
+    pid_status=$?
+    kill $pid2 2>/dev/null
+
+    return $pid_status
+}
+
 
 function cgi_handler() {
     if check_if_cgi $1; then
@@ -32,11 +50,8 @@ function check_if_cgi() {
 }
 
 function exec_cgi() {
-    unset cgi_head cgi_status_code
-    typeset -ga cgi_head
-    typeset -g cgi_status_code
-
-    local cmd pid
+    local -a cgi_head cgi_body
+    local cmd pid cgi_status_code
 
     local -x CONTENT_LENGTH="${req_headers[content-length]:-NULL}" CONTENT_TYPE="$req_headers[content-type]" GATEWAY_INTERFACE="$GATEWAY_INTERFACE" QUERY_STRING="${req_headers[querystr]#\?}" REMOTE_ADDR="$client_ip" REMOTE_HOST="NULL" REQUEST_METHOD="$req_headers[method]" SCRIPT_NAME="${1#$DOCROOT}" SERVER_NAME="$SERVER_NAME" SERVER_ADDR="$SERVER_ADDR" SERVER_PORT="$PORT" SERVER_PROTOCOL="$SERVER_PROTOCOL" SERVER_SOFTWARE="$SERVER_SOFTWARE"
 
