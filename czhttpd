@@ -93,7 +93,7 @@ esac
 
 if zsystem supports flock; then
     function mklock() {
-        zsystem flock -t $LOCK_TIMEOUT -f LOCK $1
+        zsystem flock -t 30 -f LOCK "$1"
     }
 
     function rmlock() {
@@ -105,7 +105,7 @@ else
         typeset -g LOCK=${1}.lock
         local timer_pid
 
-        sleep $LOCK_TIMEOUT &
+        sleep 30 &
         timer_pid=$!
 
         while ! mkdir $LOCK 2>/dev/null; do
@@ -417,40 +417,6 @@ function build_index() {
     html_template "$1" $index
 }
 
-function spawn_cache_worker() {
-    setopt noerrreturn
-
-    if ! whence fswatch >/dev/null; then
-        log_err "Can't find fswatch"
-        return 1
-    fi
-
-    mkdir $CACHE_DIR 2>/dev/null
-
-    (trap "worker_cleanup; exit" KILL TERM
-    setopt globdots
-
-    function worker_cleanup() {
-        kill -9 $coproc_pid 2>/dev/null
-        for i in $CACHE_DIR/*(N); rm -fr $i
-    }
-
-    local coproc_pid cache_file
-
-    coproc fswatch -r $DOCROOT
-    coproc_pid=$!
-
-    while read -p line; do
-        cache_file="${CACHE_DIR}/${line:h:gs/\//}.html"
-        [[ ! -f $cache_file ]] && { unset cache_file; continue }
-
-        mklock $cache_file
-
-        { rm $cache_file 2>/dev/null } always { rmlock }
-        unset cache_file
-    done) &
-}
-
 function send_file() {
     if [[ $req_headers[method] != "HEAD" ]]; then
         <$1
@@ -494,7 +460,19 @@ function __handler() {
         send $1
     else
         if (( $CACHE )); then
-            local cache_file="${CACHE_DIR}/${1//\//}.html"
+            local cache_file mod_time i
+
+            mod_time=$(mtime $1)
+            cache_file="${CACHE_DIR}/${1//\//}-${mod_time//[- :]/}.html"
+
+            for i in $CACHE_DIR/${1//\//}-*.html(N); do
+                [[ $i == $cache_file ]] && continue
+
+                mklock $i
+                rm $i
+                rmlock
+            done
+
             : >> $cache_file
             mklock $cache_file
 
@@ -550,8 +528,6 @@ function TRAPCHLD() {
 }
 
 function TRAPHUP() {
-    (( $CACHE )) && kill -15 $CACHE_WORKER_PID 2>/dev/null
-
     exec {logfd}>&- {errfd}>&-
     cz_init
 }
@@ -596,8 +572,7 @@ function cz_init() {
     typeset +r SERVER_SOFTWARE="czhttpd/$(printf '%.1f\n' "$((RANDOM/10000.0))")b"
     typeset +r SERVER_PROTOCOL="HTTP/1.1"
     typeset +r GATEWAY_INTERFACE="CGI/1.1"
-    typeset +r LOCK_TIMEOUT=30
-    readonly -g SERVER_NAME SERVER_ADDR SERVER_SOFTWARE SERVER_PROTOCOL GATEWAY_INTERFACE LOCK_TIMEOUT
+    readonly -g SERVER_NAME SERVER_ADDR SERVER_SOFTWARE SERVER_PROTOCOL GATEWAY_INTERFACE
 
     if [[ -z $MTYPES ]]; then
         MTYPES=( pdf       application/pdf
@@ -624,11 +599,7 @@ function cz_init() {
                  default   application/octet-stream )
     fi
 
-    # For monitoring when our cache becomes invalid
-    if (( $CACHE )); then
-        spawn_cache_worker || error "Failed to initialise cache_worker"
-        CACHE_WORKER_PID=$!
-    fi
+    (( $CACHE )) && { mkdir $CACHE_DIR || error "Failed to create cache dir" }
 }
 
 ### Main

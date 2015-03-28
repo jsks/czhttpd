@@ -30,8 +30,6 @@ The primary goal of this project was to write a web server using pure zsh. As su
 ### Optional Dependencies
 - Fallback mime-type support:
     - `file`
-- Directory caching:
-    - `fswatch`
 
 ### Usage
 ```
