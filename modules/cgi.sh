@@ -10,6 +10,8 @@
 
 ! typeset -f handler >/dev/null && function handler() { cgi_handler $* }
 
+readonly GATEWAY_INTERFACE="CGI/1.1"
+
 function timeout() {
     local pid1 pid2 pid_status
 

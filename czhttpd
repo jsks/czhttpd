@@ -108,11 +108,11 @@ else
         sleep 30 &
         timer_pid=$!
 
-        while ! mkdir $LOCK 2>/dev/null; do
+        { while ! mkdir $LOCK 2>/dev/null; do
             if ! kill -0 $timer_pid 2>/dev/null; then
                 return 1
             fi
-        done
+        done } always { kill $timer_pid 2>/dev/null }
     }
 
     function rmlock() {
@@ -121,6 +121,7 @@ else
     }
 fi
 
+### Logging/info functions
 function error() {
     setopt multios
     print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] Fatal Error: $*" >&2 >&$errfd
@@ -156,7 +157,9 @@ EOF
 exit
 }
 
+### Initialization functions
 function parse_conf() {
+
     local i
 
     if [[ -f $1 ]]; then
@@ -223,6 +226,8 @@ function parse_args() {
     fi
 }
 
+### Utility functions
+#   parse_ztcp -> return ip addr of connected client from ztcp table
 function parse_ztcp() {
     local ip_lines
 
@@ -231,6 +236,59 @@ function parse_ztcp() {
     done < <(ztcp -L)
 }
 
+function calc_size() {
+    [[ -d "$1" ]] && { print "\-"; return }
+    local KB MB GB size
+
+    KB=1024.0
+    MB=1048576.0
+    GB=1073741824.0
+
+    size=$(stat -L +size $1)
+
+    (( $size < $KB )) && { printf '%.1f%s\n' "${size}" "B" && return }
+    (( $size < $MB )) && { printf '%.1f%s\n' "$((size/$KB))" "K" && return }
+    (( $size < $GB )) && { printf '%.1f%s\n' "$((size/$MB))" "M" && return }
+    (( $size > $GB )) && { printf '%.1f%s\n' "$((size/$GB))" "G" && return }
+}
+
+function mime_type() {
+    [[ -h "${1%/}" ]] && print -n "symbolic link->"
+
+    [[ -d "$1" ]] && { print "Directory"; return }
+
+    local file_tail mtype
+
+    file_tail="${(L)1:t}"
+    if (( $+MTYPES[${file_tail#*.}] )); then
+        print $MTYPES[${file_tail#*.}]
+    else
+        if which file >/dev/null; then
+            mtype=$(file --mime-type -bL $1)
+
+            case $mtype in
+                (*"no read permission")
+                    print "application/octet-stream";;
+                ("text/"*)
+                    print "text/plain";;
+                (*)
+                    print "${${mtype#application/x-executable}:-application/octet-stream}";;
+            esac
+        else
+            print ${MTYPES[default]:-application/octet-stream}
+        fi
+    fi
+}
+
+function mtime() {
+    stat -L -F "%d-%b-%Y %H:%M" +mtime $1 2>/dev/null || print "\-"
+}
+
+function urldecode() {
+    printf '%b\n' "${1:gs/%/\\x}"
+}
+
+### HTTP functions
 function http_listen() {
     typeset -g listenfd
 
@@ -270,7 +328,7 @@ function check_request() {
     [[ -z $req_headers ]] && return 1
 
     case $req_headers[version] in
-        ("HTTP/1.1")
+        ($SERVER_PROTOCOL)
             [[ -z $req_headers[host] ]] && { error_header 400; return 1 };;
         (*)
             error_header 505
@@ -289,7 +347,7 @@ function check_request() {
 function return_header() {
     local i
 
-    print -n "HTTP/1.1 $1\r\n"
+    print -n "$SERVER_PROTOCOL $1\r\n"
 
     if [[ $HTTP_KEEP_ALIVE == 0 ]]; then
         print -n "Connection: close\r\n"
@@ -334,66 +392,8 @@ function error_header() {
     print "$message"
 }
 
-function html_template() {
-    print "<!DOCTYPE html><html><head><style type="text/css"> a {text-decoration: none;} a:hover, a:focus { color: white; background: rgba(0,0,0,0.3); cursor: pointer; } h2 { margin-bottom: 10px } table { border-collapse: collapse; } thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; } thead th:nth-child(2) { text-align: left; padding-right: 12px; } tbody td:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:first-child { padding-right: 30px; } div.list { background-color: #F5F5F5; border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; margin: 4px;} div.footer { font: 90% monospace; color: grey; font-style: italic; padding-left: 4px; }</style><title>czhttpd</title></head><body><h2>Index of $1</h2><div class=list><table><thead><tr><th>Name</th><th>Last-Modified</th><th>Size</th><th>Type</th></tr></thead><tbody>$@[2,-1]</tbody></table></div><div class=footer>$SERVER_SOFTWARE</div></body></html>"
-}
-
-function html_fragment() {
-    index+="<tr><td><a href=\"${1#*/}\">${1#*/}</a></td><td>$(mtime $1)</td><td>$(calc_size $1)</td><td>$(mime_type $1)</td></tr>"
-}
-
-function urldecode() {
-    printf '%b\n' "${1:gs/%/\\x}"
-}
-
-function mime_type() {
-    [[ -h "${1%/}" ]] && print -n "symbolic link->"
-
-    [[ -d "$1" ]] && { print "Directory"; return }
-
-    local file_tail mtype
-
-    file_tail="${(L)1:t}"
-    if (( $+MTYPES[${file_tail#*.}] )); then
-        print $MTYPES[${file_tail#*.}]
-    else
-        if which file >/dev/null; then
-            mtype=$(file --mime-type -bL $1)
-
-            case $mtype in
-                (*"no read permission")
-                    print "application/octet-stream";;
-                ("text/"*)
-                    print "text/plain";;
-                (*)
-                    print "${${mtype#application/x-executable}:-application/octet-stream}";;
-            esac
-        else
-            print ${MTYPES[default]:-application/octet-stream}
-        fi
-    fi
-}
-
-function calc_size() {
-    [[ -d "$1" ]] && { print "\-"; return }
-    local KB MB GB size
-
-    KB=1024.0
-    MB=1048576.0
-    GB=1073741824.0
-    
-    size=$(stat -L +size $1)
-
-    (( $size < $KB )) && { printf '%.1f%s\n' "${size}" "B" && return }
-    (( $size < $MB )) && { printf '%.1f%s\n' "$((size/$KB))" "K" && return }
-    (( $size < $GB )) && { printf '%.1f%s\n' "$((size/$MB))" "M" && return }
-    (( $size > $GB )) && { printf '%.1f%s\n' "$((size/$GB))" "G" && return }
-}
-
-function mtime() {
-    stat -L -F "%d-%b-%Y %H:%M" +mtime $1 2>/dev/null || print "\-"
-}
-
+### Dir listing functions
+# Iterate through directory and add each file/subdir to shared array (quicker than redirecting `print` statements)
 function build_index() {
     local -a index
     local i
@@ -417,6 +417,15 @@ function build_index() {
     html_template "$1" $index
 }
 
+function html_template() {
+    print "<!DOCTYPE html><html><head><style type="text/css"> a {text-decoration: none;} a:hover, a:focus { color: white; background: rgba(0,0,0,0.3); cursor: pointer; } h2 { margin-bottom: 10px } table { border-collapse: collapse; } thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; } thead th:nth-child(2) { text-align: left; padding-right: 12px; } tbody td:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:first-child { padding-right: 30px; } div.list { background-color: #F5F5F5; border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; margin: 4px;} div.footer { font: 90% monospace; color: grey; font-style: italic; padding-left: 4px; }</style><title>czhttpd</title></head><body><h2>Index of $1</h2><div class=list><table><thead><tr><th>Name</th><th>Last-Modified</th><th>Size</th><th>Type</th></tr></thead><tbody>$@[2,-1]</tbody></table></div><div class=footer>$SERVER_SOFTWARE</div></body></html>"
+}
+
+function html_fragment() {
+    index+="<tr><td><a href=\"${1#*/}\">${1#*/}</a></td><td>$(mtime $1)</td><td>$(calc_size $1)</td><td>$(mime_type $1)</td></tr>"
+}
+
+### Send
 function send_file() {
     if [[ $req_headers[method] != "HEAD" ]]; then
         <$1
@@ -438,6 +447,10 @@ function send_chunk() {
     fi
 }
 
+### Wrapper functions
+# send -> determines whether to send stream/file in chunks or as whole
+# handler -> how to fulfill valid request (create directory listing or send a file etc etc)
+# srv -> can we fulfill the request?
 function __send() {
     if [[ -n $1 ]]; then
         return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $fsize"
@@ -512,6 +525,9 @@ function __srv() {
     fi } always { [[ $? != 0 ]] && error_header 500 }
 }
 
+### Misc
+# TRAPCHLD -> if child exits, connection has been closed so remove from our master array
+# TRAPHUP -> signal to reload configuration
 function cleanup() {
     setopt noerrreturn
 
@@ -532,6 +548,8 @@ function TRAPHUP() {
     cz_init
 }
 
+### Main
+# cz_init -> declare our default config vars in a function so that we can later reload everything
 function cz_init() {
     LOG_FORMAT=( '[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)]'
                   '[pid: ${pid:-$sysparams[pid]}]'
@@ -540,7 +558,6 @@ function cz_init() {
                   '$req_headers[url]'
                   '$req_headers[version]' )
 
-    # Parse cli options and config file
     parse_args ${=ARGV}
     parse_conf $CONFIG
 
@@ -552,7 +569,6 @@ function cz_init() {
     ! typeset -f handler >/dev/null && function handler() { __handler $* }
     ! typeset -f srv >/dev/null && function srv() { __srv $* }
 
-    # Set our default variables
     log_f "MAXCONN: ${MAX_CONN:=12}"
     log_f "PORT: ${PORT:=8080}"
     log_f "IP_REDIRECT: ${IP_REDIRECT:=$(ip_addr)}"
@@ -567,12 +583,11 @@ function cz_init() {
     log_f "LOG_DIR: ${LOG_DIR:=/dev/null}"
 
     # readonly vars that should not be modified by anything except this f()
-    typeset +r SERVER_NAME="$IP_REDIRECT"
-    typeset +r SERVER_ADDR="$SERVER_NAME"
-    typeset +r SERVER_SOFTWARE="czhttpd/$(printf '%.1f\n' "$((RANDOM/10000.0))")b"
-    typeset +r SERVER_PROTOCOL="HTTP/1.1"
-    typeset +r GATEWAY_INTERFACE="CGI/1.1"
-    readonly -g SERVER_NAME SERVER_ADDR SERVER_SOFTWARE SERVER_PROTOCOL GATEWAY_INTERFACE
+    typeset +r -g SERVER_NAME="$IP_REDIRECT"
+    typeset +r -g SERVER_ADDR="$SERVER_NAME"
+    typeset +r -g SERVER_SOFTWARE="czhttpd/$(printf '%.1f\n' "$((RANDOM/10000.0))")b"
+    typeset +r -g SERVER_PROTOCOL="HTTP/1.1"
+    readonly -g SERVER_NAME SERVER_ADDR SERVER_SOFTWARE SERVER_PROTOCOL
 
     if [[ -z $MTYPES ]]; then
         MTYPES=( pdf       application/pdf
@@ -599,10 +614,11 @@ function cz_init() {
                  default   application/octet-stream )
     fi
 
-    (( $CACHE )) && { mkdir $CACHE_DIR || error "Failed to create cache dir" }
+    if (( $CACHE )) && [[ ! -d $CACHE_DIR ]]; then
+        mkdir $CACHE_DIR || error "Failed to create cache dir"
+    fi
 }
 
-### Main
 trap "cleanup 2>/dev/null; exit" INT KILL TERM
 
 cz_init || error "Failed to initialize czhttpd"
@@ -635,6 +651,9 @@ while :; do
     pid=$sysparams[pid]
 
     while parse_request && check_request; do
+
+        # TODO: prevent `srv` from being executed as a subshell
+        #  - Problem: want to log error msgs at highest level
         srv 2>&1 >&$fd | sysread buff
         lstatus=$pipestatus[1]
 
