@@ -21,7 +21,6 @@ The primary goal of this project was to write a web server using pure zsh. As su
 - UTF-8 support
 - Multiple concurrent connections
 - Live config reload
-- Live update of running script
 - Module support for:
     - Gzip compression
     - Basic CGI/1.1 support
@@ -57,18 +56,6 @@ czhttpd will automatically reload its configuration file and gracefully handle a
 ```
 kill -HUP <czhttpd pid>
 ```
-
-#### Live Program Update
-czhttpd can also replace the root process with another (eg updated) version of itself. Ex:
-
-```
-kill -USR1 <czhttpd pid>
-```
-
-### TODO
-- [X] URL rewrite
-- [ ] Cont. testing live config/"binary" reload (haven't had much time to play around with it)
-    - [ ] Gracefully close old connections
 
 ---
 

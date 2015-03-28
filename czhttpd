@@ -49,7 +49,9 @@ typeset -a LOG_FORMAT
 readonly SCRIPT="$0"
 readonly ARGV="$*"
 
-#### Platform specific code
+### Platform specific code
+# Ugly, but it beats having each function internally checking $OSTYPE/zsystem
+# each time it is invoked
 case $OSTYPE in
     (linux*)
         function ip_addr() {
@@ -117,7 +119,6 @@ else
     }
 fi
 
-# Functions
 function error() {
     setopt multios
     print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] Fatal Error: $*" >&2 >&$errfd
@@ -178,8 +179,8 @@ function parse_conf() {
         . $1 || print "Could not source config file $1"
     fi
 
-    if [[ ! -t $logfd || ! -t $errfd ]] && (( $LOG )); then
-        if [[ -n $LOG_DIR ]]; then
+    if [[ ! -t $logfd || ! -t $errfd ]]; then
+        if [[ -n $LOG_DIR && $LOG == 1 ]]; then
             if [[ $LOG_DIR == "/dev/null" ]]; then
                 exec {logfd}>/dev/null {errfd}>/dev/null
             elif [[ -d $LOG_DIR ]]; then
@@ -188,7 +189,6 @@ function parse_conf() {
                 error "Invalid log directory $LOG_DIR"
             fi
         else
-            print "Warning: LOG_DIR not set, output redirected to /dev/null"
             exec {logfd}>/dev/null {errfd}>/dev/null
         fi
     fi
@@ -210,23 +210,30 @@ function parse_conf() {
 
 function parse_args() {
     local -A opts
+    local i
 
-    zparseopts -K -D -A opts c: p: h v || error 2>/dev/null
+    zparseopts -D -A opts c: p: h v || error "Failed to parse arguments" 2>/dev/null
 
-    [[ -n ${(kM)opts:#-h} ]] && help
-    [[ -n ${(kM)opts:#-v} ]] && exec {errfd}>&1 {logfd}>&1
-    [[ -n $opts[-c] && ! -f $opts[-c] ]] && error "Config file $opts[-c] does not exist"
-    parse_conf ${opts[-c]:-~/.config/czhttpd/conf/main.conf}
-    [[ -n $opts[-p] ]] && PORT=$opts[-p]
+    for i in ${(kM)opts}; do
+        case $i in
+            ("-c")
+                [[ ! -f $opts[-c] ]] && error "Config file $opts[-c] does not exist"
+                CONFIG="$opts[-c]";;
+            ("-h")
+                help;;
+            ("-p")
+                readonly -g PORT="$opts[-p]";;
+            ("-v")
+                exec {errfd}>&1 {logfd}>&1;;
+        esac
+    done
 
     if [[ -n $1 ]]; then
         [[ -e $1 ]] || error "$1 is not a valid directory or file."
-        DOCROOT="$1"
+        readonly -g DOCROOT="$1"
     else
-        DOCROOT="$PWD"
+        readonly -g DOCROOT="$PWD"
     fi
-
-    log_f "> Initialized czhttpd"
 }
 
 function http_listen() {
@@ -531,7 +538,7 @@ function __srv() {
 }
 
 function reload_state() {
-    [[ $CACHE == 1 ]] && kill -15 $CACHE_WORKER_PID 2>/dev/null
+    (( $CACHE )) && kill -15 $CACHE_WORKER_PID 2>/dev/null
 
     local old_fifo old_fifo_fd old_pids
 
@@ -539,7 +546,7 @@ function reload_state() {
     old_fifo_fd=$fifofd
 
     exec {logfd}>&- {errfd}>&-
-    czhttpd_init ${=ARGV}
+    cz_init
 
     if [[ $old_fifo != $FIFO ]]; then
         rm $old_fifo
@@ -571,17 +578,34 @@ function cleanup() {
     ztcp -c
 }
 
-#### Main
-function czhttpd_init() {
+# Run this function as a trap so that we trigger a flush
+# when ${#jobstates} < $MAX_CONN
+function TRAPCHLD() {
+    while sysread -t 0 -i $fifofd -o 1 1>/dev/null; do
+        continue
+    done
+}
+
+# Upon receiving `HUP`, reload configuration
+function TRAPHUP() {
+    log_f "Reloading config..."
+    reload_state
+}
+
+### Main
+function cz_init() {
     LOG_FORMAT=( '[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)]'
-                 '[pid: ${PID:-$sysparams[pid]}]'
-                 '$client_ip'
-                 '$req_headers[method]'
-                 '$req_headers[url]'
-                 '$req_headers[version]' )
+                    '[pid: ${PID:-$sysparams[pid]}]'
+                    '$client_ip'
+                    '$req_headers[method]'
+                    '$req_headers[url]'
+                    '$req_headers[version]' )
 
     # Parse cli options and config file
     parse_args ${=ARGV}
+    parse_conf $CONFIG
+
+    log_f "> Initializing czhttpd"
 
     # Default callback functions, allows modules to override how we handle requests
     # Can't be simple aliases since shell won't find the cmd
@@ -605,13 +629,13 @@ function czhttpd_init() {
     log_f "FIFO_DIR: ${FIFO_DIR:=/tmp}"
 
     # readonly vars that should not be modified by anything except this f()
-    typeset +r -g SERVER_NAME="$IP_REDIRECT"
-    typeset +r -g SERVER_ADDR="$SERVER_NAME"
-    typeset +r -g SERVER_SOFTWARE="czhttpd/$(printf '%.1f\n' "$((RANDOM/10000.0))")b"
-    typeset +r -g SERVER_PROTOCOL="HTTP/1.1"
-    typeset +r -g GATEWAY_INTERFACE="CGI/1.1"
-    typeset +r -g LOCK_TIMEOUT=30
-    typeset -r -g SERVER_NAME SERVER_ADDR SERVER_SOFTWARE SERVER_PROTOCOL GATEWAY_INTERFACE LOCK_TIMEOUT
+    typeset +r SERVER_NAME="$IP_REDIRECT"
+    typeset +r SERVER_ADDR="$SERVER_NAME"
+    typeset +r SERVER_SOFTWARE="czhttpd/$(printf '%.1f\n' "$((RANDOM/10000.0))")b"
+    typeset +r SERVER_PROTOCOL="HTTP/1.1"
+    typeset +r GATEWAY_INTERFACE="CGI/1.1"
+    typeset +r LOCK_TIMEOUT=30
+    readonly -g SERVER_NAME SERVER_ADDR SERVER_SOFTWARE SERVER_PROTOCOL GATEWAY_INTERFACE LOCK_TIMEOUT
 
     if [[ -z $MTYPES ]]; then
         MTYPES=( pdf       application/pdf
@@ -652,83 +676,48 @@ function czhttpd_init() {
     return 0
 }
 
-function czhttpd_main() {
-    # Run this function as a trap so that we trigger a flush
-    # when ${#jobstates} < $MAX_CONN
-    function TRAPCHLD() {
-        while sysread -t 0 -i $fifofd -o 1 1>/dev/null; do
-            continue
-        done
-    }
+trap "cleanup 2>/dev/null; exit" INT KILL TERM
 
-    # Upon receiving `HUP`, reload configuration
-    function TRAPHUP() {
-        log_f "Reloading config..."
-        reload_state
-    }
+cz_init || error "Failed to initialize czhttpd"
+http_listen
 
-    # Upon receiving `USR1`, spawn a new instance and gracefully wait
-    # to terminate the old one
-    function TRAPUSR1() {
-        log_f "Reloading program..."
-        local timer_pid
-
-        (exec {logfd}>&- {errfd}>&- {fifofd}>&-; source ./$SCRIPT ${=ARGV}) &!
-
-        { sleep 3; kill -15 $$ } &
-        timer_pid=$!
-
-        wait ${jobstates//([^[:digit:]]|$timer_pid|$CACHE_WORKER_PID)/} 2>/dev/null
-        kill -9 $timer_pid 2>/dev/null
-
-        cleanup 2>/dev/null; exit
-    }
-
-    trap "cleanup 2>/dev/null; exit" INT KILL TERM
-    http_listen
-
-    while :; do
-        # Use select to block until a child writes to fifo on exit
-        while (( ${#jobstates} >= $MAX_CONN + $CACHE )); do
-            log_f "max connections hit, temporarily unable to fork"
-            zselect -r $fifofd && break
-        done
-
-        # Use select to block since interrupting `ztcp -a` crashes our program
-        zselect -r $listenfd
-        ztcp -t -a $listenfd
-
-        ( trap "child_cleanup" KILL TERM EXIT; trap '' PIPE; trap - HUP USR1 CHLD
-        function child_cleanup() { ztcp -c; print "0" >&$fifofd; exit }
-
-        local lstatus fd PID
-
-        fd=$REPLY
-
-        # Explicitly save pid so that `srv` logs the same pid even though it is run in subshell
-        PID=$sysparams[pid]
-
-        while read ip_line; do
-            [[ $ip_line[3] == "I" ]] && { local client_ip=${ip_line[(w)3]}; break }
-        done < <(ztcp -L)
-
-        if [[ $client_ip =~ [^$IP_ACCEPT] && $client_ip != "0.0.0.0" ]]; then
-            log_f "disconnected client matching filter $IP_ACCEPT"
-            exit
-        fi
-
-        while parse_request && check_request; do
-            srv 2>&1 >&$fd | sysread buff
-            lstatus=$pipestatus[1]
-
-            [[ -n $buff ]] && { log_err "${(f)buff}"; unset buff }
-
-            [[ $lstatus != 0 ]] && { log_err "closing connection"; break}
-            [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
-        done ) &
-
-        ztcp -c $REPLY
+while :; do
+    # Use select to block until a child writes to fifo on exit
+    while (( ${#jobstates} >= $MAX_CONN + $CACHE )); do
+        log_f "max connections hit, temporarily unable to fork"
+        zselect -r $fifofd && break
     done
-}
 
-czhttpd_init && czhttpd_main
+    # Use select to block since interrupting `ztcp -a` crashes our program
+    zselect -r $listenfd
+    ztcp -t -a $listenfd
+
+    ( trap "child_cleanup" KILL TERM EXIT; trap '' PIPE; trap - HUP CHLD
+    function child_cleanup() { ztcp -c; print "0" >&$fifofd; exit }
+
+    fd=$REPLY
+
+    # Explicitly save pid so that `srv` logs the same pid even though it is run in subshell
+    PID=$sysparams[pid]
+
+    while read ip_line; do
+        [[ $ip_line[3] == "I" ]] && { local client_ip=${ip_line[(w)3]}; break }
+    done < <(ztcp -L)
+
+    if [[ $client_ip =~ [^$IP_ACCEPT] && $client_ip != "0.0.0.0" ]]; then
+        log_f "disconnected client matching filter $IP_ACCEPT"
+        exit
+    fi
+
+    while parse_request && check_request; do
+        srv 2>&1 >&$fd | sysread buff
+        lstatus=$pipestatus[1]
+
+        [[ -n $buff ]] && { log_err "${(f)buff}"; unset buff }
+
+        [[ $lstatus != 0 ]] && { log_err "closing connection"; break}
+        [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
+    done ) &
+
+    ztcp -c $REPLY
+done
