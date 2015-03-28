@@ -166,7 +166,9 @@ function parse_conf() {
         . $1 || error "Could not source config file $1"
     fi
 
-    if [[ ! -t $logfd || ! -t $errfd ]]; then
+    # We need to check if logfd or errfd are valid fds; however, default value
+    # for integer is 0 so check that they aren't pointing to stdin
+    if (( ! $logfd || ! $errfd )) || [[ ! -t $logfd || ! -t $errfd ]]; then
         if [[ -n $LOG_DIR && $LOG == 1 ]]; then
             if [[ $LOG_DIR == "/dev/null" ]]; then
                 exec {logfd}>/dev/null {errfd}>/dev/null
@@ -183,7 +185,7 @@ function parse_conf() {
     # Dumb, but cli args > config file
     [[ -n _PORT ]] && { PORT=$_PORT; unset _PORT }
 
-    for i in IP_REDIRECT PORT MAX_CONN HTTP_TIMEOUT; do
+    for i in PORT MAX_CONN HTTP_TIMEOUT; do
         if [[ -n ${(P)i} && ${(P)i} != <-> ]]; then
             error "Invalid integer for $i"
         fi
@@ -281,7 +283,7 @@ function mime_type() {
 }
 
 function mtime() {
-    stat -L -F "%d-%b-%Y %H:%M" +mtime $1 2>/dev/null || print "\-"
+    stat -L -F "%d-%b-%Y %T" +mtime $1 2>/dev/null || print "\-"
 }
 
 function urldecode() {
