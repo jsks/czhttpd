@@ -91,36 +91,6 @@ case $OSTYPE in
         };;
 esac
 
-if zsystem supports flock; then
-    function mklock() {
-        zsystem flock -t 30 -f LOCK "$1"
-    }
-
-    function rmlock() {
-        zsystem flock -u LOCK
-        unset LOCK
-    }
-else
-    function mklock() {
-        typeset -g LOCK=${1}.lock
-        local timer_pid
-
-        sleep 30 &
-        timer_pid=$!
-
-        { while ! mkdir $LOCK 2>/dev/null; do
-            if ! kill -0 $timer_pid 2>/dev/null; then
-                return 1
-            fi
-        done } always { kill $timer_pid 2>/dev/null }
-    }
-
-    function rmlock() {
-        rmdir $LOCK
-        unset LOCK
-    }
-fi
-
 ### Logging/info functions
 function error() {
     setopt multios
@@ -159,7 +129,6 @@ exit
 
 ### Initialization functions
 function parse_conf() {
-
     local i
 
     if [[ -f $1 ]]; then
@@ -282,12 +251,43 @@ function mime_type() {
     fi
 }
 
+# We can't use `zsystem flock` since child shells won't respect lock
+function mklock() {
+    [[ -n $LOCK ]] && return 1
+
+    typeset -g LOCK=${1}.lock
+    local timer_pid
+
+    sleep 30 &
+    timer_pid=$!
+
+    while ! mkdir $LOCK 2>/dev/null; do
+        if ! kill -0 $timer_pid 2>/dev/null; then
+            return 1
+        fi
+    done
+
+    kill $timer_pid 2>/dev/null
+    return 0
+}
+
+function rmlock() {
+    if [[ -n $LOCK ]]; then
+        rmdir $LOCK; unset LOCK
+    fi
+}
+
 function mtime() {
     stat -L -F "%d-%b-%Y %T" +mtime $1 2>/dev/null || print "\-"
 }
 
 function urldecode() {
     printf '%b\n' "${1:gs/%/\\x}"
+}
+
+# Suppress EPIPE, thanks.
+function http_print() {
+    print -n "$*\r\n" 2>/dev/null
 }
 
 ### HTTP functions
@@ -306,29 +306,46 @@ function http_listen() {
     fi
 }
 
+# TODO: parse message body
 function parse_request() {
     unset req_headers; typeset -gA req_headers
-    local method url querystr version key value line
+    local method url querystr version key value line buff read_status
 
-    read -t $HTTP_TIMEOUT -r -u $fd line || return 1
-    for method url version in ${(s. .)line%$'\r'}; do
+    sysread -t $HTTP_TIMEOUT -s 1024 -i $fd buff
+    read_status=$?
+    case $read_status in
+        (4)
+            # Timed out
+            error_header 408;|
+        (2)
+            # Read error
+            error_header 500;|
+        (^0)
+            return 1;;
+    esac
+
+    # Request not properly terminated or perhaps too large for buffer
+    [[ ${buff[-2,-1]} != $'\r'$'\n' ]] && {  return 1 }
+
+    for method url version in ${(s. .)buff[(f)1]%$'\r'}; do
         req_headers[method]="$method"
         req_headers[url]="${url%\?*}"
         req_headers[querystr]="${(M)url%\?*}"
         req_headers[version]="$version"
     done
 
-    while read -t $HTTP_TIMEOUT -r -u $fd line; do
-        [[ -n $line && $line != $'\r' ]] || break
-        for key value in ${(s/: /)line%$'\r'}; do
+    for line in ${(f)buff[(f)2,-1]}; do
+        [[ $line == $'\r' ]] && break
+
+        for key value in ${(s.: .)line%$'\r'}; do
             req_headers[${(L)key}]="$value"
         done
     done
+
+    check_request
 }
 
 function check_request() {
-    [[ -z $req_headers ]] && return 1
-
     case $req_headers[version] in
         ($SERVER_PROTOCOL)
             [[ -z $req_headers[host] ]] && { error_header 400; return 1 };;
@@ -347,22 +364,25 @@ function check_request() {
 }
 
 function return_header() {
+    # This always needs to be set in order to deal with write errors
+    setopt err_return
+
     local i
 
-    print -n "$SERVER_PROTOCOL $1\r\n"
+    http_print "$SERVER_PROTOCOL $1"
 
     if [[ $HTTP_KEEP_ALIVE == 0 ]]; then
-        print -n "Connection: close\r\n"
+        http_print "Connection: close"
     else
-        print -n "Connection: ${req_headers[connection]:-keep-alive}\r\n"
+        http_print "Connection: ${req_headers[connection]:-keep-alive}"
     fi
 
-    print -n "Date: $(export TZ=UTC && strftime "%a, %d %b %Y %H:%M:%S" $EPOCHSECONDS) GMT\r\n"
-    print -n "Server: czhttpd\r\n"
+    http_print "Date: $(export TZ=UTC && strftime "%a, %d %b %Y %H:%M:%S" $EPOCHSECONDS) GMT"
+    http_print "Server: czhttpd"
     for i in "$@[2,-1]"; do
-        print -n "$i\r\n"
+        http_print "$i"
     done
-    print -n "\r\n"
+    http_print
 }
 
 function error_header() {
@@ -379,6 +399,8 @@ function error_header() {
             message="403 Forbidden";;
         (404)
             message="404 Not Found";;
+        (408)
+            message="408 Request Timeout";;
         (500)
             message="500 Internal Server Error";;
         (501)
@@ -389,9 +411,7 @@ function error_header() {
             message="505 HTTP Version Not Supported";;
     esac
 
-    log_f "$message"
-    return_header "$message" "Content-type: text/plain; charset=UTF-8" "Content-Length: ${#message}" $add_headers[@]
-    print "$message"
+    return_header "$message" "Content-type: text/plain; charset=UTF-8" $add_headers[@] && log_f $message
 }
 
 ### Dir listing functions
@@ -477,24 +497,18 @@ function __handler() {
         if (( $CACHE )); then
             local cache_file mod_time i
 
-            mod_time=$(mtime $1)
-            cache_file="${CACHE_DIR}/${1//\//}-${mod_time//[- :]/}.html"
-
-            for i in $CACHE_DIR/${1//\//}-*.html(N); do
-                [[ $i == $cache_file ]] && continue
-
-                mklock $i
-                rm $i
-                rmlock
-            done
-
+            cache_file="${CACHE_DIR}/${1//\//}-$(stat +mtime $1).html"
             : >> $cache_file
             mklock $cache_file
 
-            [[ ! -s $cache_file ]] && build_index $1 > $cache_file
+            if [[ ! -s $cache_file ]]; then
+                rm $CACHE_DIR/${1//\//}-*.html || :
+                build_index $1 > $cache_file
+            fi
 
-            cd $CACHE_DIR
-            { handler ${cache_file:t} } always { cd -; rmlock }
+            rmlock
+
+            { cd $CACHE_DIR; handler ${cache_file:t} } always { cd $DOCROOT }
         else
             send < <(build_index $1)
         fi
@@ -621,7 +635,7 @@ function cz_init() {
     fi
 }
 
-trap "cleanup 2>/dev/null; exit" INT KILL TERM
+trap "cleanup 2>/dev/null; exit" INT KILL TERM; trap '' PIPE
 
 cz_init || error "Failed to initialize czhttpd"
 http_listen
@@ -647,12 +661,12 @@ while :; do
         continue
     fi
 
-    ( trap "ztcp -c" KILL TERM EXIT; trap '' PIPE; trap - INT HUP CHLD
+    ( trap "ztcp -c; rmlock 2>/dev/null; exit" KILL TERM INT EXIT; trap '' PIPE; trap - CHLD
 
     # Explicitly save pid so that `srv` logs the same pid even though it is run in subshell
     pid=$sysparams[pid]
 
-    while parse_request && check_request; do
+    while parse_request >&$fd; do
 
         # TODO: prevent `srv` from being executed as a subshell
         #  - Problem: want to log error msgs at highest level
