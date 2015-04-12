@@ -22,21 +22,23 @@ function compression_filter() {
 
     if check_if_compression $1; then
         if [[ $COMPRESS_CACHE == "1" && -f $1 ]]; then
-            local mod_time="$(mtime $1)"
-            local cache_file="$COMPRESS_CACHE_DIR/${1:gs/\//}-${mod_time//[- :]/}.gz"
+            local cache_file="$COMPRESS_CACHE_DIR/${1:gs/\//}-$(stat +mtime $1).gz"
 
-            if [[ -f $cache_file ]]; then
-                gzip_fixed_header $(stat -L +size $cache_file)
-                send_file $cache_file
-            else
+            : >> $cache_file
+            mklock $cache_file
+
+            if [[ ! -s ]]; then
                 rm $COMPRESS_CACHE_DIR/${1:gs/\//.}-*.gz 2>/dev/null || :
                 gzip -$COMPRESS_LEVEL -c $1 > $cache_file
-
-                gzip_fixed_header $(stat -L +size $cache_file)
-                send_file $cache_file
             fi
+
+            rmlock
+
+            return_header "200 Ok" "Content-type: ${mtype:-application:octet-stream}; charset=UTF-8" "Content-Encoding: gzip" "Content-Length: $(stat -L +size $cache_file)"
+            send_file $cache_file
+
         else
-            gzip_chunked_header
+             return_header "200 Ok" "Content-type: ${mtype:-application:octet-stream}; charset=UTF-8" "Content-Encoding: gzip" "Transfer-Encoding: chunked"
             gzip -$COMPRESS_LEVEL -c $1 | send_chunk
         fi
 
@@ -46,18 +48,10 @@ function compression_filter() {
     fi
 }
 
-function gzip_chunked_header() {
-    return_header "200 Ok" "Content-type: ${mtype:-application:octet-stream}; charset=UTF-8" "Content-Encoding: gzip" "Transfer-Encoding: chunked"
-}
-
-function gzip_fixed_header() {
-    return_header "200 Ok" "Content-type: ${mtype:-application:octet-stream}; charset=UTF-8" "Content-Encoding: gzip" "Content-Length: $1"
-}
-
 function check_if_compression() {
     [[ -z ${(SM)req_headers[accept-encoding]#gzip} || $COMPRESS == 0 ]] && return 1
 
-    [[ ! -d $COMPRESS_CACHE_DIR ]] && { log_err "Compression cache directory does not exist"; return 1}
+    [[ ! -d $COMPRESS_CACHE_DIR ]] && { log_err "Compression cache directory does not exist"; return 1 }
 
     if [[ -f $1 ]]; then
         for i in ${(s.,.)COMPRESS_TYPES}; [[ $mtype == $i ]] && break

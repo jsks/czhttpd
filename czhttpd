@@ -647,15 +647,15 @@ while :; do
     fd=$REPLY
     client_ip=$(parse_ztcp)
 
-    # Do IP matching in the main process so we can avoid taking the time
-    # to spawn a whole new subshell just to reject a connection
-    if [[ $client_ip =~ [^$IP_ACCEPT] && $client_ip != "0.0.0.0" ]]; then
-        log_f "disconnected client matching filter $IP_ACCEPT"
+    if (( ${#conn_list} >= $MAX_CONN )); then
+        error_header 503 >&$fd
         ztcp -c $fd
 
         continue
-    elif (( ${#conn_list} >= $MAX_CONN )); then
-        error_header 503 >&$fd
+    # Do IP matching in the main process so we can avoid taking the time
+    # to spawn a whole new subshell just to reject a connection
+    elif [[ $client_ip =~ [^$IP_ACCEPT] && $client_ip != "0.0.0.0" ]]; then
+        log_f "disconnected client matching filter $IP_ACCEPT"
         ztcp -c $fd
 
         continue
@@ -674,9 +674,7 @@ while :; do
         lstatus=$pipestatus[1]
 
         [[ -n $buff ]] && { log_err "${(f)buff}"; unset buff }
-
-        [[ $lstatus != 0 ]] && { log_err "closing connection"; break }
-        [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
+        [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" || $lstatus != 0 ]] && break
     done ) &
 
     conn_list+=$!
