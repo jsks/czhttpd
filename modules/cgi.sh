@@ -33,7 +33,7 @@ function timeout() {
 
 function cgi_handler() {
     if check_if_cgi $1; then
-        exec_cgi $1 || { <&p >/dev/null; return 1 }
+        exec_cgi $1
     else
         __handler $1
     fi
@@ -73,7 +73,7 @@ function exec_cgi() {
     [[ ${1##*.} == "php" ]] && cmd="php-cgi"
 
     log_f "Executing cgi script $1"
-    coproc { timeout "$cmd $1" $CGI_TIMEOUT <&$fd }
+    coproc { timeout "$cmd $1" $CGI_TIMEOUT <<< $req_headers[msg-body] }
     pid=$!
 
     while read -r -p line; do

@@ -2,7 +2,7 @@
 ### czhttpd
 # zsh web server
 # Author: jsks
-# Site: http://github.com/jsks/czhttpd.git
+# Site: https://github.com/jsks/czhttpd
 ###
 
 # Clear env
@@ -41,15 +41,29 @@ unsetopt multibyte glob_dots err_return multios
 setopt posix_jobs bare_glob_qual local_options local_traps
 
 # Declare variable types
-integer logfd errfd
+integer logfd
 
-typeset -A MTYPES
+typeset -A MTYPES HTTP_CODES
 typeset -a LOG_FORMAT
+
+typeset -g CONFIG DOCROOT
 
 typeset -A req_headers
 typeset -a conn_list
 
-readonly ARGV="$*"
+HTTP_CODES=( 200    "Ok"
+             301    "Moved Permanently"
+             400    "Bad Request"
+             403    "Forbidden"
+             404    "Not Found"
+             408    "Request Timeout"
+             413    "Request Entity Too Large"
+             500    "Internal Server Error"
+             501    "Not Implemented"
+             503    "Service Unavailable"
+             505    "HTTP Version Not Supported" )
+
+readonly HTTP_CODES ARGV="$*"
 
 ### Platform specific code
 # Ugly, but it beats having each function internally check $OSTYPE/zsystem
@@ -94,7 +108,7 @@ esac
 ### Logging/info functions
 function error() {
     setopt multios
-    print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] Fatal Error: $*" >&2 >&$errfd
+    print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] Fatal Error: $*" >&2 >&$logfd
 
     cleanup 2>/dev/null
     exit 113
@@ -105,7 +119,7 @@ function log_f() {
 }
 
 function log_err() {
-    print "${(e@)LOG_FORMAT} Error -> $*" >&$errfd
+    print "${(e@)LOG_FORMAT} Error -> $*" >&$logfd
 }
 
 function help() {
@@ -135,26 +149,10 @@ function parse_conf() {
         . $1 || error "Could not source config file $1"
     fi
 
-    # We need to check if logfd or errfd are valid fds; however, default value
-    # for integer is 0 so check that they aren't pointing to stdin
-    if (( ! $logfd || ! $errfd )) || [[ ! -t $logfd || ! -t $errfd ]]; then
-        if [[ -n $LOG_DIR && $LOG == 1 ]]; then
-            if [[ $LOG_DIR == "/dev/null" ]]; then
-                exec {logfd}>/dev/null {errfd}>/dev/null
-            elif [[ -d $LOG_DIR ]]; then
-                exec {logfd}>>$LOG_DIR/access.log {errfd}>>$LOG_DIR/error.log
-            else
-                error "Invalid log directory $LOG_DIR"
-            fi
-        else
-            exec {logfd}>/dev/null {errfd}>/dev/null
-        fi
-    fi
-
     # Dumb, but cli args > config file
     [[ -n _PORT ]] && { PORT=$_PORT; unset _PORT }
 
-    for i in PORT MAX_CONN HTTP_TIMEOUT; do
+    for i in PORT MAX_CONN HTTP_TIMEOUT HTTP_RECV_TIMEOUT HTTP_BODY_SIZE; do
         if [[ -n ${(P)i} && ${(P)i} != <-> ]]; then
             error "Invalid integer for $i"
         fi
@@ -165,6 +163,23 @@ function parse_conf() {
             error "Invalid integer for $i"
         fi
     done
+
+    # We need to check if logfd is a valid fd; however, default value
+    # for integer is 0 so check that it isn't pointing to stdin
+    if (( ! $logfd )) || [[ ! -t $logfd ]]; then
+        if [[ -n $LOG_FILE && $LOG == 1 ]]; then
+            if [[ -e $LOG_FILE && ! -f $LOG_FILE || ! -w $LOG_FILE ]]; then
+                error "Invalid logging file $LOG_FILE"
+            elif [[ ! -w ${LOG_FILE:h} ]]; then
+                error "Cannot create logging file $LOG_FILE"
+            fi
+
+            : >> $LOG_FILE
+            exec {logfd}>>$LOG_FILE
+        else
+            exec {logfd}>/dev/null
+        fi
+    fi
 }
 
 function parse_args() {
@@ -183,7 +198,7 @@ function parse_args() {
             ("-p")
                 _PORT="$opts[-p]";;
             ("-v")
-                exec {errfd}>&1 {logfd}>&1;;
+                exec {logfd}>&1;;
         esac
     done
 
@@ -285,12 +300,12 @@ function urldecode() {
     printf '%b\n' "${1:gs/%/\\x}"
 }
 
+### HTTP functions
 # Suppress EPIPE, thanks.
 function http_print() {
     print -n "$*\r\n" 2>/dev/null
 }
 
-### HTTP functions
 function http_listen() {
     typeset -g listenfd
 
@@ -306,46 +321,85 @@ function http_listen() {
     fi
 }
 
-# TODO: parse message body
+# Would be marginally quicker to use sysread + we would have better return
+# values, but that would also add an insane amount of complexity
+# (esp. wrt to pipelining).
+#
+# Ex: One of our shortcomings now is that we don't know why `read` (may)
+# fail, so we can't return a 408 on timeout.
 function parse_request() {
+    setopt err_return
+
     unset req_headers; typeset -gA req_headers
-    local method url querystr version key value line buff read_status
+    local method url version key value line buff
 
-    sysread -t $HTTP_TIMEOUT -s 1024 -i $fd buff
-    read_status=$?
-    case $read_status in
-        (4)
-            # Timed out
-            error_header 408;|
-        (2)
-            # Read error
-            error_header 500;|
-        (^0)
-            return 1;;
-    esac
+    read -t $HTTP_TIMEOUT -r -u $fd line
 
-    # Request not properly terminated or perhaps too large for buffer
-    [[ ${buff[-2,-1]} != $'\r'$'\n' ]] && {  return 1 }
-
-    for method url version in ${(s. .)buff[(f)1]%$'\r'}; do
+    for method url version in ${(s. .)line%$'\r'}; do
         req_headers[method]="$method"
         req_headers[url]="${url%\?*}"
         req_headers[querystr]="${(M)url%\?*}"
         req_headers[version]="$version"
     done
 
-    for line in ${(f)buff[(f)2,-1]}; do
-        [[ $line == $'\r' ]] && break
+    while :; do
+        read -t $HTTP_TIMEOUT -r -u $fd line
+        [[ -z $line || $line == $'\r' ]] && break
 
         for key value in ${(s.: .)line%$'\r'}; do
+            # Malformed request
+            [[ -z $key || -z $value ]] && { error_header 400; return 1 }
+
             req_headers[${(L)key}]="$value"
         done
     done
 
     check_request
+
+    if [[ $req_headers[transfer-encoding] == "chunked" ]]; then
+        parse_chunk_body
+    elif [[ -n $req_headers[content-length] ]]; then
+        [[ $req_headers[content-length] != <-> ]] && { error_header 400; return 1 }
+        (( $req_headers[content-length] > $HTTP_BODY_SIZE )) && { error_header 413; return 1 }
+
+        sysread -t $HTTP_TIMEOUT -s $req_headers[content-length] -i $fd buff
+        req_headers[msg-body]="${buff%$'\r'}"
+    fi
+}
+
+function parse_chunk_body() {
+    local line chunk_size buff
+    local -i count=0 total=0
+
+    while :; do
+        # Find our hexadecimal first
+        read -t $HTTP_TIMEOUT -r -u $fd line
+        [[ -z ${line%$'\r'} ]] && continue
+
+        # If 0 we're at the end
+        [[ ${line%$'\r'} == 0 ]] && return 0
+
+        # Convert hex and add \r\n to size
+        chunk_size=$(($(printf '%d\n' 0x${line%$'\r'}) + 2))
+        sysread -c count -t $HTTP_TIMEOUT -s $chunk_size -i $fd buff
+
+        total+=$count
+        (( $total > $HTTP_BODY_SIZE )) && { error_header 413; return 1 }
+
+        req_headers[msg-body]+="${buff%$'\r'}"
+        unset line
+    done
+
+    error_header 400
+    return 1
 }
 
 function check_request() {
+    if [[ -z $req_headers[url] || -z $req_headers[method] || -z $req_headers[version] ]]; then
+        error_header 400
+        return 1
+    fi
+
     case $req_headers[version] in
         ($SERVER_PROTOCOL)
             [[ -z $req_headers[host] ]] && { error_header 400; return 1 };;
@@ -386,36 +440,18 @@ function return_header() {
 }
 
 function error_header() {
-    local message
-    local -a add_headers
-
-    case "$1" in
-        (301)
-            message="301 Moved Permanently"
-            add_headers+="Location: $2";;
-        (400)
-            message="400 Bad Request";;
-        (403)
-            message="403 Forbidden";;
-        (404)
-            message="404 Not Found";;
-        (408)
-            message="408 Request Timeout";;
-        (500)
-            message="500 Internal Server Error";;
-        (501)
-            message="501 Not Implemented";;
-        (503)
-            message="503 Service Unavailable";;
-        (505)
-            message="505 HTTP Version Not Supported";;
-    esac
-
-    return_header "$message" "Content-type: text/plain; charset=UTF-8" $add_headers[@] && log_f $message
+    if [[ -n $HTTP_CODES[$1] ]]; then
+        log_f "$1 $HTTP_CODES[$1]"
+        return_header "$1 $HTTP_CODES[$1]" "Content-type: text/plain; charset=UTF-8" $@[2,-1]
+    else
+        log_err "Could not find status code $1"
+        return 1
+    fi
 }
 
 ### Dir listing functions
-# Iterate through directory and add each file/subdir to shared array (quicker than redirecting `print` statements)
+# Iterate through directory and add each file/subdir to shared array
+# (quicker than redirecting `print` statements)
 function build_index() {
     local -a index
     local i
@@ -517,6 +553,7 @@ function __handler() {
 
 function __srv() {
     setopt err_return
+
     local pathname="${DOCROOT}$(urldecode ${1:-$req_headers[url]})"
 
     [[ $HIDDEN_FILES != "1" && ${pathname:t} == .* ]] && { error_header 403; return }
@@ -526,7 +563,7 @@ function __srv() {
         handler $pathname
     elif [[ -d $pathname ]]; then
         if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
-            error_header 301 "http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
+            error_header 301 "Location: http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
         elif [[ -f $pathname/$INDEX_FILE ]]; then
             handler $pathname/$INDEX_FILE
         else
@@ -550,7 +587,7 @@ function cleanup() {
     kill -15 ${(SM)jobstates##<->} 2>/dev/null
 
     log_f "> Exiting main"
-    exec {logfd}>&- {errfd}>&-
+    exec {logfd}>&-
     rm -rf $CACHE_DIR
     ztcp -c
 }
@@ -560,8 +597,8 @@ function TRAPCHLD() {
 }
 
 function TRAPHUP() {
-    exec {logfd}>&- {errfd}>&-
-    cz_init
+    exec {logfd}>&-
+    cz_init || error "Failed to reload configuration"
 }
 
 ### Main
@@ -585,18 +622,23 @@ function cz_init() {
     ! typeset -f handler >/dev/null && function handler() { __handler $* }
     ! typeset -f srv >/dev/null && function srv() { __srv $* }
 
-    log_f "MAXCONN: ${MAX_CONN:=12}"
+    log_f "MAX_CONN: ${MAX_CONN:=12}"
     log_f "PORT: ${PORT:=8080}"
     log_f "IP_REDIRECT: ${IP_REDIRECT:=$(ip_addr)}"
     log_f "IP_ACCEPT: ${IP_ACCEPT:=[0-9*].[0-9*].[0-9*].[0-9*]}"
     log_f "HTTP_KEEP_ALIVE: ${HTTP_KEEP_ALIVE:=1}"
     log_f "HTTP_TIMEOUT: ${HTTP_TIMEOUT:=30}"
+    log_f "HTTP_RECV_TIMEOUT: ${HTTP_RECV_TIMEOUT:=5}"
+    log_f "HTTP_BODY_SIZE: ${HTTP_BODY_SIZE:=16384}"
     log_f "INDEX_FILE: ${INDEX_FILE:=index.html}"
     log_f "HIDDEN_FILES: ${HIDDEN_FILES:=0}"
     log_f "FOLLOW_SYMLINKS: ${FOLLOW_SYMLINKS:=0}"
     log_f "CACHE: ${CACHE:=0}"
     log_f "CACHE_DIR: ${CACHE_DIR:=/tmp/.czhttpd-$$/}"
-    log_f "LOG_DIR: ${LOG_DIR:=/dev/null}"
+    log_f "LOG_FILE: ${LOG_FILE:=/dev/null}"
+
+    # Convert our timeout from seconds
+    ZSELECT_TIMEOUT=$(($HTTP_TIMEOUT*100))
 
     # readonly vars that should not be modified by anything except this f()
     typeset +r -g SERVER_NAME="$IP_REDIRECT"
@@ -641,8 +683,9 @@ cz_init || error "Failed to initialize czhttpd"
 http_listen
 
 while :; do
-    # Use select to block since interrupting `ztcp -a` crashes our script
-    { zselect -r $listenfd && ztcp -t -a $listenfd } || continue
+    # Use select to block since interrupting `ztcp -a` crashes our script. We
+    # really should be using '-t' but ztcp polling is broken in OSX
+    { zselect -r $listenfd && ztcp -a $listenfd } || continue
 
     fd=$REPLY
     client_ip=$(parse_ztcp)
@@ -666,10 +709,16 @@ while :; do
     # Explicitly save pid so that `srv` logs the same pid even though it is run in subshell
     pid=$sysparams[pid]
 
-    while parse_request >&$fd; do
+    while :; do
+        zselect -t $ZSELECT_TIMEOUT -r $fd || { error_header 408 >&$fd; break }
+
+        # How do we want to handle stderr?
+        parse_request >&$fd || break
 
         # TODO: prevent `srv` from being executed as a subshell
         #  - Problem: want to log error msgs at highest level
+        #             BUT can't use process sub since subshell
+        #             won't have a copy of `logfd`
         srv 2>&1 >&$fd | sysread buff
         lstatus=$pipestatus[1]
 
