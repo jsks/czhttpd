@@ -36,7 +36,6 @@ zmodload zsh/zselect
 #   posix_jobs - for handling jobs in communicating child->parent
 #   bare_glob_qual - required for our patterns in `list_dir`
 #   local_options - selectively turn on multios & err_return
-#   local_traps - restore traps after exiting f()
 unsetopt multibyte glob_dots err_return multios
 setopt posix_jobs bare_glob_qual local_options
 

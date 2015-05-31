@@ -84,7 +84,3 @@ function srv_hook() {
 
     log_dbg "$cmd: requested resource $1 is $msg"
 }
-
-function index_hook() {
-    log_dbg "$cmd: found ${(e)*} $PWD"
-}
