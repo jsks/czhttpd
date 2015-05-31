@@ -1,7 +1,7 @@
 # Module to compress server output using gzip
 
 # Declare our module defaults
-: ${COMPRESS:=1}
+: ${COMPRESS:=0}
 : ${COMPRESS_TYPES:="text/html,text/css,text/javascript"}
 : ${COMPRESS_LEVEL:=6}
 : ${COMPRESS_MIN_SIZE:=1000}

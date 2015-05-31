@@ -4,7 +4,7 @@
 # Maybe. Hopefully.
 
 # Declare our default variables
-: ${CGI_ENABLE:=1}
+: ${CGI_ENABLE:=0}
 : ${CGI_EXTS:="php"}
 : ${CGI_TIMEOUT=300}
 
@@ -13,6 +13,7 @@
 readonly GATEWAY_INTERFACE="CGI/1.1"
 
 function timeout() {
+    setopt local_traps
     local pid1 pid2 pid_status
 
     function TRAPCHLD() {

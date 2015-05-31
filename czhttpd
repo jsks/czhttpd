@@ -38,7 +38,7 @@ zmodload zsh/zselect
 #   local_options - selectively turn on multios & err_return
 #   local_traps - restore traps after exiting f()
 unsetopt multibyte glob_dots err_return multios
-setopt posix_jobs bare_glob_qual local_options local_traps
+setopt posix_jobs bare_glob_qual local_options
 
 # Declare variable types
 integer logfd
@@ -514,7 +514,7 @@ function __send() {
         return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $fsize"
         send_file $1
     else
-        return_header "200 Ok" "Content-type: text/html; charset=UTF-8" "Transfer-Encoding: chunked"
+        return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Transfer-Encoding: chunked"
         send_chunk
     fi
 
@@ -522,9 +522,9 @@ function __send() {
 }
 
 function __handler() {
-    if [[ -f $1 ]]; then
-        local mtype fsize
+    local mtype fsize
 
+    if [[ -f $1 ]]; then
         [[ -z $mtype ]] && mtype=$(mime_type $1)
         [[ -z $fsize ]] && fsize=$(stat -L +size $1)
 
@@ -546,6 +546,7 @@ function __handler() {
 
             { cd $CACHE_DIR; handler ${cache_file:t} } always { cd $DOCROOT }
         else
+            mtype="text/html"
             send < <(build_index $1)
         fi
     fi
@@ -553,7 +554,6 @@ function __handler() {
 
 function __srv() {
     setopt err_return
-
     local pathname="${DOCROOT}$(urldecode ${1:-$req_headers[url]})"
 
     [[ $HIDDEN_FILES != "1" && ${pathname:t} == .* ]] && { error_header 403; return }
@@ -593,7 +593,7 @@ function cleanup() {
 }
 
 function TRAPCHLD() {
-    for i in $conn_list; kill -0 $conn_list 2>/dev/null || conn_list=(${conn_list#$i})
+    for i in $conn_list; kill -0 $i 2>/dev/null || conn_list=(${conn_list#$i})
 }
 
 function TRAPHUP() {
@@ -704,7 +704,7 @@ while :; do
         continue
     fi
 
-    ( trap "ztcp -c; rmlock 2>/dev/null; exit" KILL TERM INT EXIT; trap '' PIPE; trap - CHLD
+    ( trap "ztcp -c; rmlock 2>/dev/null; exit" KILL TERM INT EXIT; trap '' PIPE; trap - CHLD HUP
 
     # Explicitly save pid so that `srv` logs the same pid even though it is run in subshell
     pid=$sysparams[pid]
@@ -713,7 +713,10 @@ while :; do
         zselect -t $ZSELECT_TIMEOUT -r $fd || { error_header 408 >&$fd; break }
 
         # How do we want to handle stderr?
-        parse_request >&$fd || break
+        parse_request >&$fd
+
+        # err_return breaks when we use `cmd1 || cmd2`
+        [[ $? != 0 ]] && break
 
         # TODO: prevent `srv` from being executed as a subshell
         #  - Problem: want to log error msgs at highest level

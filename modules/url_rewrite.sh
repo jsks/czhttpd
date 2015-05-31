@@ -1,6 +1,6 @@
 # Module for url rewrite
 
-: ${URL_REWRITE:=1}
+: ${URL_REWRITE:=0}
 zmodload zsh/pcre
 ! typeset -f srv >/dev/null && function srv() { url_rewrite $* }
 
