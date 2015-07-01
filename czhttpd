@@ -107,17 +107,26 @@ esac
 ### Logging/info functions
 function error() {
     setopt multios
-    print "[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)] Fatal Error: $*" >&2 >&$logfd
+    local cur_time
+    get_time
+
+    print "[$cur_time] Fatal Error: $*" >&2 >&$logfd
 
     cleanup 2>/dev/null
     exit 113
 }
 
 function log_f() {
+    local cur_time
+    get_time
+
     print "${(e@)LOG_FORMAT} $*" >&$logfd
 }
 
 function log_err() {
+    local cur_time
+    get_time
+
     print "${(e@)LOG_FORMAT} Error -> $*" >&$logfd
 }
 
@@ -226,6 +235,10 @@ function calc_size() {
     (( $size < $MB )) && { printf '%.1f%s\n' "$((size/$KB))" "K" && return }
     (( $size < $GB )) && { printf '%.1f%s\n' "$((size/$MB))" "M" && return }
     (( $size > $GB )) && { printf '%.1f%s\n' "$((size/$GB))" "G" && return }
+}
+
+function get_time() {
+    strftime -s cur_time "%a %d %b, %H:%M:%S" $EPOCHSECONDS
 }
 
 function mime_type() {
@@ -410,8 +423,9 @@ function check_request() {
 function return_header() {
     # This always needs to be set in order to deal with write errors
     setopt err_return
-
-    local i
+    local i cur_time
+    local -x TZ=UTC
+    get_time
 
     http_print "$SERVER_PROTOCOL $1"
 
@@ -421,7 +435,7 @@ function return_header() {
         http_print "Connection: ${req_headers[connection]:-keep-alive}"
     fi
 
-    http_print "Date: $(export TZ=UTC && strftime "%a, %d %b %Y %H:%M:%S" $EPOCHSECONDS) GMT"
+    http_print "Date: $cur_time GMT"
     http_print "Server: czhttpd"
     for i in "$@[2,-1]"; do
         http_print "$i"
@@ -594,7 +608,7 @@ function TRAPHUP() {
 ### Main
 # cz_init -> declare our default config vars in a function so that we can later reload everything
 function cz_init() {
-    LOG_FORMAT=( '[$(strftime "%a %d %b, %H:%M:%S" $EPOCHSECONDS)]'
+    LOG_FORMAT=( '[$cur_time]'
                   '[pid: ${pid:-$sysparams[pid]}]'
                   '$client_ip'
                   '$req_headers[method]'
