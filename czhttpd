@@ -55,7 +55,6 @@ HTTP_CODES=( 200    "Ok"
              400    "Bad Request"
              403    "Forbidden"
              404    "Not Found"
-             408    "Request Timeout"
              413    "Request Entity Too Large"
              500    "Internal Server Error"
              501    "Not Implemented"
@@ -349,9 +348,10 @@ function http_listen() {
     fi
 }
 
+###
 # Would be marginally quicker to use sysread + we would have better return
 # values, but that would also add an insane amount of complexity
-# (esp. wrt to pipelining).
+# (esp. wrt pipelining).
 #
 # Ex: One of our shortcomings now is that we don't know why `read` (may)
 # fail, so we can't return a 408 on timeout.
@@ -516,7 +516,7 @@ function send_file() {
         local -i filefd
         exec {filefd}<$1
 
-        # TODO: handle sysread return
+        # TODO: handle sysread return values
         while sysread -i $filefd -o 1; do
             continue
         done
@@ -666,7 +666,6 @@ function cz_init() {
     log_f "IP_ACCEPT: ${IP_ACCEPT:=[0-9*].[0-9*].[0-9*].[0-9*]}"
     log_f "HTTP_KEEP_ALIVE: ${HTTP_KEEP_ALIVE:=1}"
     log_f "HTTP_TIMEOUT: ${HTTP_TIMEOUT:=30}"
-    log_f "HTTP_RECV_TIMEOUT: ${HTTP_RECV_TIMEOUT:=5}"
     log_f "HTTP_BODY_SIZE: ${HTTP_BODY_SIZE:=16384}"
     log_f "INDEX_FILE: ${INDEX_FILE:=index.html}"
     log_f "HIDDEN_FILES: ${HIDDEN_FILES:=0}"
@@ -674,9 +673,6 @@ function cz_init() {
     log_f "CACHE: ${CACHE:=0}"
     log_f "CACHE_DIR: ${CACHE_DIR:=/tmp/.czhttpd-$$/}"
     log_f "LOG_FILE: ${LOG_FILE:=/dev/null}"
-
-    # Convert our timeout from seconds
-    ZSELECT_TIMEOUT=$(($HTTP_TIMEOUT*100))
 
     # readonly vars that should not be modified by anything except this f()
     typeset +r -g SERVER_NAME="$IP_REDIRECT"
@@ -739,8 +735,6 @@ while :; do
     pid=$sysparams[pid]
 
     while :; do
-        zselect -t $ZSELECT_TIMEOUT -r $fd || { error_header 408 >&$fd; break }
-
         # How do we want to handle stderr?
         parse_request >&$fd
 
