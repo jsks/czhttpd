@@ -61,11 +61,9 @@ HTTP_CODES=( 200    "Ok"
 readonly HTTP_CODES ARGV="$*"
 
 ### Platform specific code
-# Ugly, but it beats having each function internally check $OSTYPE/zsystem
-# each time it is invoked
-case $OSTYPE in
-    (linux*)
-        function ip_addr() {
+function ip_addr() {
+    case $OSTYPE in
+        (linux*)
             local -a tcp_list ip
             local i k v
 
@@ -81,10 +79,8 @@ case $OSTYPE in
                 fi
             done
 
-            printf "%d.%d.%d.%d\n" ${(Oa)ip[@]}
-        };;
-    (darwin*|*bsd*)
-        function ip_addr() {
+            printf "%d.%d.%d.%d\n" ${(Oa)ip[@]};;
+        (darwin*|*bsd*)
             local line
 
             while read line; do
@@ -92,19 +88,16 @@ case $OSTYPE in
                     print ${line[(w)2]}
                     return
                 fi
-            done < <(ifconfig)
-        };;
-    (*)
-        function ip_addr() {
-            print "127.0.0.1"
-        };;
-esac
+            done < <(ifconfig);;
+        (*)
+            print "127.0.0.1";;
+    esac
+}
 
 ### Logging/info functions
-# It would be quicker to use a file descriptor; h/o, we
-# can't guarantee that every subshell will receive a copy
-# (ex: command substitution). Only alternative: throw
-# away stderr from `srv`
+# It would be quicker to use a file descriptor for LOG_FILE; h/o, we can't
+# guarantee that every subshell will receive a copy (ex: command substitution).
+# Only alternative: throw away stderr from `srv`
 
 function error() {
     local cur_time
@@ -161,7 +154,7 @@ function parse_conf() {
     # Dumb, but cli args > config file
     [[ -n _PORT ]] && { PORT=$_PORT; unset _PORT }
 
-    for i in PORT MAX_CONN HTTP_TIMEOUT HTTP_BODY_SIZE; do
+    for i in PORT MAX_CONN HTTP_TIMEOUT HTTP_RECV_TIMEOUT HTTP_BODY_SIZE; do
         if [[ -n ${(P)i} && ${(P)i} != <-> ]]; then
             error "Invalid integer for $i"
         fi
@@ -222,8 +215,8 @@ function parse_args() {
 ### Utility functions
 # Dear reader, I apologize in advance for this, but all of these utility
 # functions modify scoped variables rather than return (`print`) values.
-# Subshells are expensive and we care about latency, remember to declare
-# vars in calling f().
+# Subshells are expensive and we care about latency, remember to declare vars in
+# calling f().
 
 ###
 # Calculate size of file in appropriate units.
@@ -350,17 +343,19 @@ function http_listen() {
 
 ###
 # Would be marginally quicker to use sysread + we would have better return
-# values, but that would also add an insane amount of complexity
-# (esp. wrt pipelining).
+# values, but that would also add an insane amount of complexity (esp. wrt
+# pipelining).
 #
-# Ex: One of our shortcomings now is that we don't know why `read` (may)
-# fail, so we can't return a 408 on timeout.
+# Ex: One of our shortcomings now is that we don't know why `read` (may) fail,
+# so we can't return a 408 on timeout.
 function parse_request() {
     setopt err_return
 
     unset req_headers; typeset -gA req_headers
     local method url version key value line
 
+    # Use HTTP_TIMEOUT for first read since we're blocking until initial bytes
+    # from request
     read -t $HTTP_TIMEOUT -r -u $fd line
 
     for method url version in ${(s. .)line%$'\r'}; do
@@ -371,7 +366,7 @@ function parse_request() {
     done
 
     while :; do
-        read -t $HTTP_TIMEOUT -r -u $fd line
+        read -t $HTTP_RECV_TIMEOUT -r -u $fd line
         [[ -z $line || $line == $'\r' ]] && break
 
         for key value in ${(s.: .)line%$'\r'}; do
@@ -394,7 +389,7 @@ function parse_request_body() {
 
         while :; do
             # Find our hexadecimal first
-            read -t $HTTP_TIMEOUT -r -u $fd line
+            read -t $HTTP_RECV_TIMEOUT -r -u $fd line
             [[ -z ${line%$'\r'} ]] && continue
 
             # If 0 we're at the end
@@ -402,7 +397,7 @@ function parse_request_body() {
 
             # Convert hex and add \r\n to size
             chunk_size=$(($(printf '%d\n' 0x${line%$'\r'}) + 2))
-            sysread -c count -t $HTTP_TIMEOUT -s $chunk_size -i $fd buff
+            sysread -c count -t $HTTP_RECV_TIMEOUT -s $chunk_size -i $fd buff
 
             total+=$count
             (( total > HTTP_BODY_SIZE )) && { error_header 413; return 1 }
@@ -416,7 +411,7 @@ function parse_request_body() {
         [[ $req_headers[content-length] != <-> ]] && { error_header 400; return 1 }
         (( req_headers[content-length] > HTTP_BODY_SIZE )) && { error_header 413; return 1 }
 
-        sysread -t $HTTP_TIMEOUT -s $req_headers[content-length] -i $fd buff
+        sysread -t $HTTP_RECV_TIMEOUT -s $req_headers[content-length] -i $fd buff
         req_headers[msg-body]="${buff%$'\r'}"
     fi
 }
@@ -477,8 +472,8 @@ function error_header() {
 }
 
 ### Dir listing functions
-# Iterate through directory and add each file/subdir to shared str
-# (quicker than redirecting `print` statements; also faster than shared array)
+# Iterate through directory and add each file/subdir to shared str (quicker than
+# redirecting `print` statements; also faster than shared array)
 function build_index() {
     local i index
 
@@ -540,9 +535,7 @@ function send_chunk() {
 }
 
 ### Wrapper functions
-# send -> determines whether to send stream/file in chunks or as whole
-# handler -> how to fulfill valid request (create directory listing or send a file etc etc)
-# srv -> can we fulfill the request?
+# Determines whether to send stream/file in chunks or as whole
 function __send() {
     if [[ -n $1 ]]; then
         return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $fsize"
@@ -555,6 +548,8 @@ function __send() {
     log_f "200"
 }
 
+###
+# How to fulfill valid request(create directory listing or send a file etc etc)
 function __handler() {
     if [[ -f $1 ]]; then
         local mtype
@@ -589,6 +584,8 @@ function __handler() {
     fi
 }
 
+###
+# Can we fulfill the request?
 function __srv() {
     setopt err_return
     local pathname="${DOCROOT}$(urldecode ${1:-$req_headers[url]})"
@@ -616,8 +613,6 @@ function __srv() {
 }
 
 ### Misc
-# TRAPCHLD -> if child exits, connection has been closed so remove from our master array
-# TRAPHUP -> signal to reload configuration
 function cleanup() {
     setopt noerrreturn
 
@@ -628,16 +623,20 @@ function cleanup() {
     ztcp -c
 }
 
+###
+# If child exits, connection has been closed so remove from our master array
 function TRAPCHLD() {
     for i in $conn_list; kill -0 $i 2>/dev/null || conn_list=(${conn_list#$i})
 }
 
+###
+# Signal to reload configuration
 function TRAPHUP() {
     cz_init || error "Failed to reload configuration"
 }
 
 ### Main
-# cz_init -> declare our default config vars in a function so that we can later reload everything
+# Declare our default config vars in a function so that we can later reload
 function cz_init() {
     LOG_FORMAT=(  '[$cur_time]'
                   '[pid: ${sysparams[pid]}]'
@@ -651,8 +650,8 @@ function cz_init() {
 
     log_f "> Initializing czhttpd"
 
-    # Default callback functions, allows modules to override how we handle requests
-    # Can't be simple aliases since shell won't find the cmd
+    # Default callback functions, allows modules to override how we handle
+    # requests Can't be simple aliases since shell won't find the cmd
     ! typeset -f send >/dev/null && function send() { __send $* }
     ! typeset -f handler >/dev/null && function handler() { __handler $* }
     ! typeset -f srv >/dev/null && function srv() { __srv $* }
@@ -663,6 +662,7 @@ function cz_init() {
     log_f "IP_ACCEPT: ${IP_ACCEPT:=[0-9*].[0-9*].[0-9*].[0-9*]}"
     log_f "HTTP_KEEP_ALIVE: ${HTTP_KEEP_ALIVE:=1}"
     log_f "HTTP_TIMEOUT: ${HTTP_TIMEOUT:=30}"
+    log_f "HTTP_RECV_TIMEOUT: ${HTTP_RECV_TIMEOUT:=5}"
     log_f "HTTP_BODY_SIZE: ${HTTP_BODY_SIZE:=16384}"
     log_f "INDEX_FILE: ${INDEX_FILE:=index.html}"
     log_f "HIDDEN_FILES: ${HIDDEN_FILES:=0}"
