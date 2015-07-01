@@ -510,9 +510,18 @@ function html_fragment() {
 }
 
 ### Send
+# Quicker to send using `sysread` rather than redirection (ex: `<$1`)
 function send_file() {
     if [[ $req_headers[method] != "HEAD" ]]; then
-        <$1
+        local -i filefd
+        exec {filefd}<$1
+
+        # TODO: handle sysread return
+        while sysread -i $filefd -o 1; do
+            continue
+        done
+
+        exec {filefd}>&-
     fi
 }
 
