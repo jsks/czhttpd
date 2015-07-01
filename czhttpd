@@ -212,15 +212,6 @@ function parse_args() {
 }
 
 ### Utility functions
-#   parse_ztcp -> return ip addr of connected client from ztcp table
-function parse_ztcp() {
-    local ip_lines
-
-    while read ip_line; do
-        [[ $ip_line[3] == "I" ]] && { print ${ip_line[(w)3]}; break }
-    done < <(ztcp -L)
-}
-
 function calc_size() {
     [[ -d "$1" ]] && { print "\-"; return }
     local KB MB GB size
@@ -687,19 +678,10 @@ while :; do
     { zselect -r $listenfd && ztcp -a $listenfd } || continue
 
     fd=$REPLY
-    client_ip=$(parse_ztcp)
 
     if (( ${#conn_list} >= $MAX_CONN )); then
         error_header 503 >&$fd
         ztcp -c $fd
-
-        continue
-    # Do IP matching in the main process so we can avoid taking the time
-    # to spawn a whole new subshell just to reject a connection
-    elif [[ $client_ip =~ [^$IP_ACCEPT] && $client_ip != "0.0.0.0" ]]; then
-        log_f "disconnected client matching filter $IP_ACCEPT"
-        ztcp -c $fd
-
         continue
     fi
 
