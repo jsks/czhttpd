@@ -221,55 +221,77 @@ function parse_args() {
 }
 
 ### Utility functions
+# Dear reader, I apologize in advance for this, but all of these utility
+# functions modify scoped variables rather than return (`print`) values.
+# Subshells are expensive and we care about latency, remember to declare
+# vars in calling f().
+
+###
+# Calculate size of file in appropriate units.
+#   @Sets var -> `fsize`
 function calc_size() {
-    [[ -d "$1" ]] && { print "\-"; return }
-    local KB MB GB size
+    [[ -d "$1" ]] && { fsize="-"; return }
+    local -F KB MB GB
+    local -a stat_size
 
     KB=1024.0
     MB=1048576.0
     GB=1073741824.0
 
-    size=$(stat -L +size $1)
+    stat -A stat_size -L +size $1
+    local -F 1 stat_size=$stat_size
 
-    (( $size < $KB )) && { printf '%.1f%s\n' "${size}" "B" && return }
-    (( $size < $MB )) && { printf '%.1f%s\n' "$((size/$KB))" "K" && return }
-    (( $size < $GB )) && { printf '%.1f%s\n' "$((size/$MB))" "M" && return }
-    (( $size > $GB )) && { printf '%.1f%s\n' "$((size/$GB))" "G" && return }
+    (( stat_size < KB )) && { fsize="${stat_size}B"; return }
+    (( stat_size < MB )) && { ((stat_size/=KB)); fsize="${stat_size}K"; return }
+    (( stat_size < GB )) && { ((stat_size/=MB)); fsize="${stat_size}M"; return }
+    (( stat_size > GB )) && { ((stat_size/=GB)); fsize="${stat_size}G"; return }
 }
 
+###
+# Formatted time string
+#   @Sets var -> `cur_time`
 function get_time() {
     strftime -s cur_time "%a %d %b, %H:%M:%S" $EPOCHSECONDS
 }
 
+###
+# Mime type according to first, our global mtype array, and second `file`
+#   @Sets var -> `mtype`
 function mime_type() {
-    [[ -h "${1%/}" ]] && print -n "symbolic link->"
+    [[ -h "${1%/}" ]] && mtype="symbolic link->"
 
-    [[ -d "$1" ]] && { print "Directory"; return }
+    [[ -d "$1" ]] && { mtype+="Directory"; return }
 
-    local file_tail mtype
+    local tail file_mime
 
-    file_tail="${(L)1:t}"
-    if (( $+MTYPES[${file_tail#*.}] )); then
-        print $MTYPES[${file_tail#*.}]
+    tail="${(L)1:t}"
+    if (( $+MTYPES[${tail#*.}] )); then
+        mtype+="$MTYPES[${tail#*.}]"
     else
         if which file >/dev/null; then
-            mtype=$(file --mime-type -bL $1)
+            file_mime=$(file --mime-type -bL $1)
 
-            case $mtype in
+            case $file_mime in
                 (*"no read permission")
-                    print "application/octet-stream";;
+                    mtype+="application/octet-stream";;
                 ("text/"*)
-                    print "text/plain";;
+                    mtype+="text/plain";;
                 (*)
-                    print "${${mtype#application/x-executable}:-application/octet-stream}";;
+                    mtype+="${${mtype#application/x-executable}:-application/octet-stream}";;
             esac
         else
-            print ${MTYPES[default]:-application/octet-stream}
+            mtype+="${MTYPES[default]:-application/octet-stream}"
         fi
     fi
 }
 
-# We can't use `zsystem flock` since child shells won't respect lock
+###
+# Lock using mkdir
+#   @Sets var -> LOCK
+#
+#   Note:
+#       - We can't use `zsystem flock` since child shells won't respect lock
+#       - LOCK will be declared global so that all f()s have access
 function mklock() {
     [[ -n $LOCK ]] && return 1
 
@@ -289,16 +311,24 @@ function mklock() {
     return 0
 }
 
+###
+# Unlock using rmdir
+#   @Unsets var -> LOCK
 function rmlock() {
     if [[ -n $LOCK ]]; then
         rmdir $LOCK; unset LOCK
     fi
 }
 
-function mtime() {
-    stat -L -F "%d-%b-%Y %T" +mtime $1 2>/dev/null || print "\-"
+###
+# Formatted last modification time for file
+#   @Sets array -> mtime
+function mod_time() {
+    stat -A mtime -L -F "%d-%b-%Y %T" +mtime $1 2>/dev/null || print "\-"
 }
 
+###
+# No way around subshell
 function urldecode() {
     printf '%b\n' "${1:gs/%/\\x}"
 }
@@ -454,37 +484,35 @@ function error_header() {
 }
 
 ### Dir listing functions
-# Iterate through directory and add each file/subdir to shared array
-# (quicker than redirecting `print` statements)
+# Iterate through directory and add each file/subdir to shared str
+# (quicker than redirecting `print` statements; also faster than shared array)
 function build_index() {
-    local -a index
-    local i
+    local i index
 
     cd "$1"
 
-    [[ "${1%/}" != "${DOCROOT%/}" ]] && html_fragment '/../'
+    [[ "${1%/}" != "${DOCROOT%/}" ]] && html_fragment '../'
 
     if (( $HIDDEN_FILES )); then
-        for i in ./.*(-/NrT) ./.*(-.Nr); do
-            html_fragment "$i"
-        done
+        for i in .*(-/NrT) .*(-.Nr); html_fragment "$i"
     fi
 
-    for i in ./*(-/NrT) ./*(-.Nr); do
-        html_fragment "$i"
-    done
+    for i in *(-/NrT) *(-.Nr); html_fragment "$i"
 
     cd -
 
-    html_template "$1" $index
-}
-
-function html_template() {
-    print "<!DOCTYPE html><html><head><style type="text/css"> a {text-decoration: none;} a:hover, a:focus { color: white; background: rgba(0,0,0,0.3); cursor: pointer; } h2 { margin-bottom: 10px } table { border-collapse: collapse; } thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; } thead th:nth-child(2) { text-align: left; padding-right: 12px; } tbody td:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:first-child { padding-right: 30px; } div.list { background-color: #F5F5F5; border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; margin: 4px;} div.footer { font: 90% monospace; color: grey; font-style: italic; padding-left: 4px; }</style><title>czhttpd</title></head><body><h2>Index of $1</h2><div class=list><table><thead><tr><th>Name</th><th>Last-Modified</th><th>Size</th><th>Type</th></tr></thead><tbody>$@[2,-1]</tbody></table></div><div class=footer>$SERVER_SOFTWARE</div></body></html>"
+    print "<!DOCTYPE html><html><head><style type="text/css"> a {text-decoration: none;} a:hover, a:focus { color: white; background: rgba(0,0,0,0.3); cursor: pointer; } h2 { margin-bottom: 10px } table { border-collapse: collapse; } thead th { padding-top: 4px; padding-bottom: 6px; text-align: left; } thead th:nth-child(2) { text-align: left; padding-right: 12px; } tbody td:nth-child(2) { text-align: right; padding-right: 12px; } tbody td:first-child { padding-right: 30px; } div.list { background-color: #F5F5F5; border-top: 1px solid black; border-bottom: 1px solid black; font: 90% monospace; margin: 4px;} div.footer { font: 90% monospace; color: grey; font-style: italic; padding-left: 4px; }</style><title>czhttpd</title></head><body><h2>Index of $1</h2><div class=list><table><thead><tr><th>Name</th><th>Last-Modified</th><th>Size</th><th>Type</th></tr></thead><tbody>${index[@]}</tbody></table></div><div class=footer>$SERVER_SOFTWARE</div></body></html>"
 }
 
 function html_fragment() {
-    index+="<tr><td><a href=\"${1#*/}\">${1#*/}</a></td><td>$(mtime $1)</td><td>$(calc_size $1)</td><td>$(mime_type $1)</td></tr>"
+    local mtype fsize
+    local -a mtime
+
+    mod_time $1
+    calc_size $1
+    mime_type $1
+
+    index+="<tr><td><a href=\"$1\">$1</a></td><td>$mtime</td><td>$fsize</td><td>$mtype</td></tr>"
 }
 
 ### Send
@@ -526,18 +554,21 @@ function __send() {
 }
 
 function __handler() {
-    local mtype fsize
-
     if [[ -f $1 ]]; then
-        [[ -z $mtype ]] && mtype=$(mime_type $1)
-        [[ -z $fsize ]] && fsize=$(stat -L +size $1)
+        local mtype
+        local -a fsize
+
+        [[ -z $mtype ]] && mime_type $1
+        [[ -z $fsize ]] && stat -A fsize -L +size $1
 
         send $1
     else
         if (( $CACHE )); then
-            local cache_file mod_time i
+            local cache_file
+            local -a mtime
 
-            cache_file="${CACHE_DIR}/${1//\//}-$(stat +mtime $1).html"
+            stat -A mtime +mtime $1
+            cache_file="${CACHE_DIR}/${1//\//}-$mtime.html"
             : >> $cache_file
             mklock $cache_file
 
@@ -608,7 +639,7 @@ function TRAPHUP() {
 ### Main
 # cz_init -> declare our default config vars in a function so that we can later reload everything
 function cz_init() {
-    LOG_FORMAT=( '[$cur_time]'
+    LOG_FORMAT=(  '[$cur_time]'
                   '[pid: ${pid:-$sysparams[pid]}]'
                   '$client_ip'
                   '$req_headers[method]'
