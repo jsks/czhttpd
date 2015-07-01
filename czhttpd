@@ -359,7 +359,7 @@ function parse_request() {
     setopt err_return
 
     unset req_headers; typeset -gA req_headers
-    local method url version key value line buff
+    local method url version key value line
 
     read -t $HTTP_TIMEOUT -r -u $fd line
 
@@ -382,44 +382,43 @@ function parse_request() {
         done
     done
 
-    check_request
+    parse_request_body
+}
+
+function parse_request_body() {
+    local buff
 
     if [[ $req_headers[transfer-encoding] == "chunked" ]]; then
-        parse_chunk_body
+        local line chunk_size
+        local -i count total
+
+        while :; do
+            # Find our hexadecimal first
+            read -t $HTTP_TIMEOUT -r -u $fd line
+            [[ -z ${line%$'\r'} ]] && continue
+
+            # If 0 we're at the end
+            [[ ${line%$'\r'} == 0 ]] && return 0
+
+            # Convert hex and add \r\n to size
+            chunk_size=$(($(printf '%d\n' 0x${line%$'\r'}) + 2))
+            sysread -c count -t $HTTP_TIMEOUT -s $chunk_size -i $fd buff
+
+            total+=$count
+            (( total > HTTP_BODY_SIZE )) && { error_header 413; return 1 }
+
+            req_headers[msg-body]+="${buff%$'\r'}"
+            unset line
+        done
+
+        error_header 400; return 1
     elif [[ -n $req_headers[content-length] ]]; then
         [[ $req_headers[content-length] != <-> ]] && { error_header 400; return 1 }
-        (( $req_headers[content-length] > $HTTP_BODY_SIZE )) && { error_header 413; return 1 }
+        (( req_headers[content-length] > HTTP_BODY_SIZE )) && { error_header 413; return 1 }
 
         sysread -t $HTTP_TIMEOUT -s $req_headers[content-length] -i $fd buff
         req_headers[msg-body]="${buff%$'\r'}"
     fi
-}
-
-function parse_chunk_body() {
-    local line chunk_size buff
-    local -i count=0 total=0
-
-    while :; do
-        # Find our hexadecimal first
-        read -t $HTTP_TIMEOUT -r -u $fd line
-        [[ -z ${line%$'\r'} ]] && continue
-
-        # If 0 we're at the end
-        [[ ${line%$'\r'} == 0 ]] && return 0
-
-        # Convert hex and add \r\n to size
-        chunk_size=$(($(printf '%d\n' 0x${line%$'\r'}) + 2))
-        sysread -c count -t $HTTP_TIMEOUT -s $chunk_size -i $fd buff
-
-        total+=$count
-        (( $total > $HTTP_BODY_SIZE )) && { error_header 413; return 1 }
-
-        req_headers[msg-body]+="${buff%$'\r'}"
-        unset line
-    done
-
-    error_header 400
-    return 1
 }
 
 function check_request() {
@@ -718,7 +717,6 @@ while :; do
     # Use select to block since interrupting `ztcp -a` crashes our script. We
     # really should be using '-t' but ztcp polling is broken in OSX
     { zselect -r $listenfd && ztcp -a $listenfd } || continue
-
     fd=$REPLY
 
     if (( ${#conn_list} >= $MAX_CONN )); then
@@ -729,17 +727,10 @@ while :; do
 
     ( trap "ztcp -c; rmlock 2>/dev/null; exit" KILL TERM INT EXIT; trap '' PIPE; trap - CHLD HUP
 
-    while :; do
-        # How do we want to handle stderr?
-        parse_request >&$fd
-
-        # err_return breaks when we use `cmd1 || cmd2`
-        [[ $? != 0 ]] && break
-
-        srv >&$fd 2> >(sysread buff; [[ -n $buff ]] && log_err "${(f)buff}")
-
+    while parse_request && check_request; do
+        srv 2> >(sysread buff; [[ -n $buff ]] && log_err "${(f)buff}")
         [[ $? != 0 || $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
-    done ) &
+    done ) >&$fd &
 
     conn_list+=$!
     ztcp -c $fd
