@@ -31,17 +31,14 @@ zmodload zsh/zselect
 #   multibyte - to accurately get length of utf8 strings
 #   glob_dots - prevent iterating through dot files automatically
 #   err_return - set only within `srv` to handle errors at highest level
-#   multios - prevent redirecting file descriptor more than once (srv)
 # set:
 #   posix_jobs - for handling jobs in communicating child->parent
 #   bare_glob_qual - required for our patterns in `list_dir`
 #   local_options - selectively turn on multios & err_return
-unsetopt multibyte glob_dots err_return multios
+unsetopt multibyte glob_dots err_return
 setopt posix_jobs bare_glob_qual local_options
 
 # Declare variable types
-integer logfd
-
 typeset -A MTYPES HTTP_CODES
 typeset -a LOG_FORMAT
 
@@ -104,12 +101,17 @@ case $OSTYPE in
 esac
 
 ### Logging/info functions
+# It would be quicker to use a file descriptor; h/o, we
+# can't guarantee that every subshell will receive a copy
+# (ex: command substitution). Only alternative: throw
+# away stderr from `srv`
+
 function error() {
-    setopt multios
     local cur_time
+    setopt multios
     get_time
 
-    print "[$cur_time] Fatal Error: $*" >&2 >&$logfd
+    print "[$cur_time] Fatal Error: $*" >&2 >>$LOG_FILE
 
     cleanup 2>/dev/null
     exit 113
@@ -119,14 +121,14 @@ function log_f() {
     local cur_time
     get_time
 
-    print "${(e@)LOG_FORMAT} $*" >&$logfd
+    print "${(e@)LOG_FORMAT} $*" >>$LOG_FILE
 }
 
 function log_err() {
     local cur_time
     get_time
 
-    print "${(e@)LOG_FORMAT} Error -> $*" >&$logfd
+    print "${(e@)LOG_FORMAT} Error -> $*" >>$LOG_FILE
 }
 
 function help() {
@@ -159,33 +161,31 @@ function parse_conf() {
     # Dumb, but cli args > config file
     [[ -n _PORT ]] && { PORT=$_PORT; unset _PORT }
 
-    for i in PORT MAX_CONN HTTP_TIMEOUT HTTP_RECV_TIMEOUT HTTP_BODY_SIZE; do
+    for i in PORT MAX_CONN HTTP_TIMEOUT HTTP_BODY_SIZE; do
         if [[ -n ${(P)i} && ${(P)i} != <-> ]]; then
             error "Invalid integer for $i"
         fi
     done
 
-    for i in HTTP_KEEP_ALIVE HIDDEN_FILES FOLLOW_SYMLINKS LOG CACHE; do
+    for i in HTTP_KEEP_ALIVE HIDDEN_FILES FOLLOW_SYMLINKS CACHE; do
         if [[ -n ${(P)i} && ${(P)i} != [01] ]]; then
             error "Invalid integer for $i"
         fi
     done
 
-    # We need to check if logfd is a valid fd; however, default value
-    # for integer is 0 so check that it isn't pointing to stdin
-    if (( ! $logfd )) || [[ ! -t $logfd ]]; then
-        if [[ -n $LOG_FILE && $LOG == 1 ]]; then
-            if [[ -e $LOG_FILE && ! -f $LOG_FILE || ! -w $LOG_FILE ]]; then
-                error "Invalid logging file $LOG_FILE"
-            elif [[ ! -w ${LOG_FILE:h} ]]; then
-                error "Cannot create logging file $LOG_FILE"
-            fi
-
-            : >> $LOG_FILE
-            exec {logfd}>>$LOG_FILE
-        else
-            exec {logfd}>/dev/null
+    if [[ -n $_LOG_FILE ]]; then
+        LOG_FILE="$_LOG_FILE"
+        unset _LOG_FILE
+    elif [[ -n $LOG_FILE ]]; then
+        if [[ -e $LOG_FILE && ! -f $LOG_FILE || ! -w $LOG_FILE ]]; then
+            error "Invalid logging file: $LOG_FILE"
+        elif [[ ! -w ${LOG_FILE:h} ]]; then
+            error "Cannot create logging file: $LOG_FILE"
         fi
+
+        : >> $LOG_FILE
+    else
+        LOG_FILE="/dev/null"
     fi
 }
 
@@ -205,7 +205,7 @@ function parse_args() {
             ("-p")
                 _PORT="$opts[-p]";;
             ("-v")
-                exec {logfd}>&1;;
+                _LOG_FILE="/dev/tty";;
         esac
     done
 
@@ -625,7 +625,6 @@ function cleanup() {
     kill -15 ${(SM)jobstates##<->} 2>/dev/null
 
     log_f "> Exiting main"
-    exec {logfd}>&-
     rm -rf $CACHE_DIR
     ztcp -c
 }
@@ -635,7 +634,6 @@ function TRAPCHLD() {
 }
 
 function TRAPHUP() {
-    exec {logfd}>&-
     cz_init || error "Failed to reload configuration"
 }
 
@@ -643,7 +641,7 @@ function TRAPHUP() {
 # cz_init -> declare our default config vars in a function so that we can later reload everything
 function cz_init() {
     LOG_FORMAT=(  '[$cur_time]'
-                  '[pid: ${pid:-$sysparams[pid]}]'
+                  '[pid: ${sysparams[pid]}]'
                   '$client_ip'
                   '$req_headers[method]'
                   '$req_headers[url]'
@@ -731,9 +729,6 @@ while :; do
 
     ( trap "ztcp -c; rmlock 2>/dev/null; exit" KILL TERM INT EXIT; trap '' PIPE; trap - CHLD HUP
 
-    # Explicitly save pid so that `srv` logs the same pid even though it is run in subshell
-    pid=$sysparams[pid]
-
     while :; do
         # How do we want to handle stderr?
         parse_request >&$fd
@@ -741,15 +736,9 @@ while :; do
         # err_return breaks when we use `cmd1 || cmd2`
         [[ $? != 0 ]] && break
 
-        # TODO: prevent `srv` from being executed as a subshell
-        #  - Problem: want to log error msgs at highest level
-        #             BUT can't use process sub since subshell
-        #             won't have a copy of `logfd`
-        srv 2>&1 >&$fd | sysread buff
-        lstatus=$pipestatus[1]
+        srv >&$fd 2> >(sysread buff; [[ -n $buff ]] && log_err "${(f)buff}")
 
-        [[ -n $buff ]] && { log_err "${(f)buff}"; unset buff }
-        [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" || $lstatus != 0 ]] && break
+        [[ $? != 0 || $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
     done ) &
 
     conn_list+=$!
