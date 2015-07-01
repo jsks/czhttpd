@@ -334,11 +334,6 @@ function urldecode() {
 }
 
 ### HTTP functions
-# Suppress EPIPE, thanks.
-function http_print() {
-    print -n "$*\r\n" 2>/dev/null
-}
-
 function http_listen() {
     typeset -g listenfd
 
@@ -451,26 +446,25 @@ function check_request() {
 }
 
 function return_header() {
-    # This always needs to be set in order to deal with write errors
-    setopt err_return
-    local i cur_time
+    local i cur_time resp_headers
     local -x TZ=UTC
     get_time
 
-    http_print "$SERVER_PROTOCOL $1"
+    resp_headers+="$SERVER_PROTOCOL $1\r\n"
 
     if [[ $HTTP_KEEP_ALIVE == 0 ]]; then
-        http_print "Connection: close"
+        resp_headers+="Connection: close\r\n"
     else
-        http_print "Connection: ${req_headers[connection]:-keep-alive}"
+        resp_headers+="Connection: ${req_headers[connection]:-keep-alive}\r\n"
     fi
 
-    http_print "Date: $cur_time GMT"
-    http_print "Server: czhttpd"
-    for i in "$@[2,-1]"; do
-        http_print "$i"
-    done
-    http_print
+    resp_headers+="Date: $cur_time GMT\r\n"
+    resp_headers+="Server: czhttpd\r\n"
+
+    for i in "$@[2,-1]"; resp_headers+="$i\r\n"
+
+    # Suppress EPIPE, thanks.
+    print -n "$resp_headers\r\n" 2>/dev/null
 }
 
 function error_header() {
