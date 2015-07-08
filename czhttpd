@@ -349,8 +349,6 @@ function http_listen() {
 # Ex: One of our shortcomings now is that we don't know why `read` (may) fail,
 # so we can't return a 408 on timeout.
 function parse_request() {
-    setopt err_return
-
     unset req_headers; typeset -gA req_headers
     local method url version key value line
 
@@ -587,7 +585,6 @@ function __handler() {
 ###
 # Can we fulfill the request?
 function __srv() {
-    setopt err_return
     local pathname="${DOCROOT}$(urldecode ${1:-$req_headers[url]})"
 
     [[ $HIDDEN_FILES != "1" && ${pathname:t} == .* ]] && { error_header 403; return }
@@ -726,9 +723,15 @@ while :; do
     fi
 
     ( trap "ztcp -c; rmlock 2>/dev/null; exit" KILL TERM INT EXIT; trap '' PIPE; trap - CHLD HUP
+    setopt err_return
 
-    while parse_request && check_request; do
+    while :; do
+        # err_return does not work in condition expressions, see:
+        # http://www.zsh.org/mla/users/2012/msg00816.html
+        parse_request
+        check_request
         srv 2> >(sysread buff; [[ -n $buff ]] && log_err "${(f)buff}")
+
         [[ $? != 0 || $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
     done ) >&$fd &
 
