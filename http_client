@@ -79,7 +79,7 @@ function chttp::parse_args() {
             ("--output"|"-o")
                 : > $opts[$i]
                 [[ $__outfd != 0 ]] && exec {__outfd}>&-
-                exec {__outfd}>&- {__outfd}>$opts[$i];;
+                exec {__outfd}>$opts[$i];;
             ("--http"|"-t")
                 version="$opts[$i]";;
             ("--data"|"-d")
