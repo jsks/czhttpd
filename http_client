@@ -1,0 +1,241 @@
+#!/bin/zsh
+# http_client - simple http client written in zsh
+# author: @jsks
+#
+# Can be used either as a zsh library or standalone script
+# $ ./http_client --help
+#
+# As a sourced script, functions are given the 'chttp::' prefix and "public"
+# global variables the prefix 'CHTTP_' to avoid namespace conflicts.
+#
+#   Library Functions:
+#       chttp::parse_args
+#       chttp::connect
+#       chttp::send_request
+#       chttp::read_response
+#   Global Vars:
+#       CHTTP_RESP_HEADERS
+#       CHTTP_TIMES
+#       CHTTP_DOWNLOAD_SIZE
+#####
+
+for __i in "zsh/net/tcp" "zsh/system" "zsh/datetime" "zsh/zselect"; do
+    if ! zmodload -e $__i; then
+        zmodload $__i || { print "Failed to load $__i"; return 1 }
+    fi
+done
+
+setopt hist_subst_pattern extended_glob nomultibyte
+
+typeset -A CHTTP_RESP_HEADERS CHTTP_TIMES
+integer CHTTP_DOWNLOAD_SIZE
+
+typeset -a __ADD_HEADERS
+typeset __HOST __PORT __REQ_DATA __REQUEST
+integer __RECV_TIMEOUT=10
+
+integer __fd __verbosefd __outfd
+
+function chttp::error() {
+    print "$*" >&2
+    return 1
+}
+
+function chttp::help() {
+<<EOF
+chttp_client - simple http client
+USAGE: ./http_client [OPTIONS] HOST:PORT/[FILE,DIR]
+
+Options:
+    -d | --data     Data to send along with request. Does not
+                    automatically set request method
+    -h | --header   Additional header. May overwrite default headers
+    -t | --http     HTTP version to use
+    -m | --method   Method used in request. Will not check if valid
+    -o | --output   Output download to given file (default: stdout)
+    -v | --verbose  Verbose output
+EOF
+
+exit
+}
+
+function chttp::parse_args() {
+    unset __ADD_HEADERS __REQ_DATA
+    typeset -ga __ADD_HEADERS
+    typeset -g __REQ_DATA
+
+    local -A opts
+    local i method version
+
+    zparseopts -D -A  opts -verbose v -header+:=__ADD_HEADERS h+:=__ADD_HEADERS -method: m: -http: t: -output: o: -data: d: -help || ctcp::error "Failed to parse args"
+
+    for i in ${(k)opts}; do
+        case $i in
+            ("--verbose"|"-v")
+                [[ $__verbosefd != 0 ]] && exec {__verbosefd}>&-
+                exec {__verbosefd}>&1;;
+            ("--method"|"-m")
+                method=$opts[$i];;
+            ("--output"|"-o")
+                : > $opts[$i]
+                [[ $__outfd != 0 ]] && exec {__outfd}>&-
+                exec {__outfd}>&- {__outfd}>$opts[$i];;
+            ("--http"|"-t")
+                version="$opts[$i]";;
+            ("--data"|"-d")
+                __REQ_DATA="$opts[$i]";;
+            ("--help")
+                chttp::help;;
+        esac
+    done
+
+    [[ $__verbosefd == 0 ]] && exec {__verbosefd}>/dev/null
+    [[ $__outfd == 0 ]] && exec {__outfd}>&1
+
+    # Pattern matching, the tenth circle of hell
+    __HOST="${1[(ws.:.)1]%/*}"
+    __PORT="${1:s/(?~:)#[:]#//:s/\/*//}"
+    __REQUEST="${method:-GET} ${1:s/(?~\/)#\/#/\//} HTTP/${version:-1.1}"
+}
+
+function chttp::connect() {
+    unset CHTTP_TIMES; typeset -gA CHTTP_TIMES
+    unset REPLY
+    local -F start stop
+
+    repeat 3; do
+        start=$EPOCHREALTIME
+        ztcp $__HOST ${__PORT:-80} 2>/dev/null
+        stop=$EPOCHREALTIME
+
+        if [[ -n $REPLY ]] ; then
+            __fd=$REPLY
+            CHTTP_TIMES[connect]="$start,$stop"
+            return
+        fi
+    done
+
+    chttp::error "Unable to connect to $__HOST:${__PORT:-80}"
+}
+
+function chttp::send_request() {
+    local str i
+    local -F start stop
+     
+    start=$EPOCHREALTIME 
+
+    str+="$__REQUEST\r\n"
+    str+="Host: $__HOST\r\n"
+    
+    for i in $__ADD_HEADERS; [[ $i != '--header' ]] && str+="$i\r\n"
+
+    if [[ -n $__REQ_DATA && -z ${(SM)__ADD_HEADERS#(#i)content-length} ]]; then
+        str+="Content-length: ${#__REQ_DATA}\r\n"
+    fi
+
+    print -n "$str\r\n$__REQ_DATA" >&$__fd 2>/dev/null
+    
+    stop=$EPOCHREALTIME
+    CHTTP_TIMES[send]="$start,$stop"
+}
+
+function chttp::read_response() {
+    unset CHTTP_RESP_HEADERS; typeset -gA CHTTP_RESP_HEADERS
+    local line key value
+    local -F start stop
+
+    zselect -r $__fd && start=$EPOCHREALTIME || return 1
+
+    read -t $__RECV_TIMEOUT -r -u $__fd line
+    CHTTP_RESP_HEADERS[status_line]="${line%$'\r'}"
+
+    while read -t $__RECV_TIMEOUT -r -u $__fd line; do
+       [[ -z $line || $line == $'\r' ]] && break
+       
+        for key value in ${(s.: .)line%$'\r'}; do
+            CHTTP_RESP_HEADERS[${(L)key}]="$value"
+        done
+    done 
+
+    chttp::print_headers >&$__verbosefd
+
+    chttp::read_body
+    stop=$EPOCHREALTIME
+
+    CHTTP_TIMES[first_byte]="${CHTTP_TIMES[send][(ws.,.)2]},$start"
+    CHTTP_TIMES[download]="$start,$stop"
+}
+
+function chttp::read_body() {
+    unset CHTTP_DOWNLOAD_SIZE; typeset -gi CHTTP_DOWNLOAD_SIZE
+    local line
+    local -i count chunk_size offset
+
+    if [[ $CHTTP_RESP_HEADERS[content-length] > 0 ]]; then
+        sysread -o $__outfd -t $__RECV_TIMEOUT -i $__fd -s $CHTTP_RESP_HEADERS[content-length] -c CHTTP_DOWNLOAD_SIZE
+        (( count > CHTTP_RESP_HEADERS[content-length] )) && return 1
+    elif [[ $CHTTP_RESP_HEADERS[transfer-encoding] == "chunked" ]]; then
+        while :; do
+            offset=2
+            read -t $__RECV_TIMEOUT -r -u $__fd line
+            [[ -z ${line%$'\r'} ]] && continue
+
+            [[ ${line%$'\r'} == 0 ]] && { return 0 }
+
+            chunk_size=$(printf '%d\n' 0x${line%$'\r'})
+
+            while :; do
+                sysread -o $__outfd -t $__RECV_TIMEOUT -s $chunk_size -c count -i $__fd
+                CHTTP_DOWNLOAD_SIZE+=$count
+                (( ! (chunk_size-=count) )) && break
+            done
+
+            while :; do
+                sysread -o 1 -t $__RECV_TIMEOUT -s $offset -c count -i $__fd >/dev/null
+                (( ! (offset-=count) )) && break
+            done
+            
+            unset line
+        done
+    fi
+}
+
+function chttp::print_headers() {
+    local i
+
+    print "${CHTTP_RESP_HEADERS[status_line]}"
+    for i in ${(k)CHTTP_RESP_HEADERS}; do
+        [[ $i != "status_line" ]] && print "$i: $CHTTP_RESP_HEADERS[$i]"
+    done
+    print
+}
+
+function chttp::calc_time() {
+    print $(( ${CHTTP_TIMES[$1][(ws.,.)2]} - ${CHTTP_TIMES[$1][(ws.,.)1]} ))
+}
+
+function chttp::print_times() {
+    local i
+
+    for i in connect send first_byte download total; do
+        if [[ $i != "total" ]]; then
+            printf "Time to $i: %.3fs\n" $(chttp::calc_time $i) >&$__verbosefd
+        else
+            printf "Total time: %.3fs\n" $(( $(chttp::calc_time connect) + $(chttp::calc_time send) + $(chttp::calc_time download) )) >&$__verbosefd
+        fi
+    done
+}
+
+if [[ $ZSH_EVAL_CONTEXT == 'toplevel' ]]; then
+    trap "ztcp -c; exit" INT TERM KILL EXIT ZERR
+
+    chttp::parse_args $*
+
+    chttp::connect
+    chttp::send_request
+    chttp::read_response
+
+    print >&$__verbosefd
+    print "Download size: $CHTTP_DOWNLOAD_SIZE" >&$__verbosefd
+    chttp::print_times
+fi
