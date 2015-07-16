@@ -170,7 +170,9 @@ function parse_conf() {
         LOG_FILE="$_LOG_FILE"
         unset _LOG_FILE
     elif [[ -n $LOG_FILE ]]; then
-        if [[ -e $LOG_FILE && ! -f $LOG_FILE || ! -w $LOG_FILE ]]; then
+        if [[ $LOG_FILE == "/dev/null" || $LOG_FILE == "/dev/tty" ]]; then
+            :
+        elif [[ -e $LOG_FILE && ! -f $LOG_FILE || ! -w $LOG_FILE ]]; then
             error "Invalid logging file: $LOG_FILE"
         elif [[ ! -w ${LOG_FILE:h} ]]; then
             error "Cannot create logging file: $LOG_FILE"
@@ -198,7 +200,7 @@ function parse_args() {
             ("-p")
                 _PORT="$opts[-p]";;
             ("-v")
-                _LOG_FILE="/dev/tty";;
+                _LOG_FILE=/dev/tty;;
         esac
     done
 
@@ -206,9 +208,11 @@ function parse_args() {
 
     if [[ -n $1 ]]; then
         [[ -e $1 ]] || error "$1 is not a valid directory or file."
-        readonly -g DOCROOT="$1"
+        typeset +r -g DOCROOT="$1"
+        readonly -g DOCROOT
     else
-        readonly -g DOCROOT="$PWD"
+        typeset +r -g DOCROOT="$PWD"
+        readonly -g DOCROOT
     fi
 }
 
@@ -409,7 +413,8 @@ function parse_request_body() {
         [[ $req_headers[content-length] != <-> ]] && { error_header 400; return 1 }
         (( req_headers[content-length] > HTTP_BODY_SIZE )) && { error_header 413; return 1 }
 
-        sysread -t $HTTP_RECV_TIMEOUT -s $req_headers[content-length] -i $fd buff
+        sysread -t $HTTP_RECV_TIMEOUT -s $req_headers[content-length] -c count -i $fd buff
+        (( count != $req_headers[content-length] )) && { error_header 400; return 1 }
         req_headers[msg-body]="${buff%$'\r'}"
     fi
 }
@@ -461,8 +466,9 @@ function return_header() {
 
 function error_header() {
     if [[ -n $HTTP_CODES[$1] ]]; then
+        return_header "$1 $HTTP_CODES[$1]" "Content-type: text/plain; charset=UTF-8" "Content-length: $(( ${#1} + ${#HTTP_CODES[$1]} + 1))" $@[2,-1]
+        print -n "$1 $HTTP_CODES[$1]"
         log_f "$1 $HTTP_CODES[$1]"
-        return_header "$1 $HTTP_CODES[$1]" "Content-type: text/plain; charset=UTF-8" $@[2,-1]
     else
         log_err "Could not find status code $1"
         return 1
@@ -591,7 +597,7 @@ function __srv() {
     [[ $FOLLOW_SYMLINKS != "1" && -h ${pathname%/} ]] && { error_header 403; return }
 
     { if [[ -f $pathname ]]; then
-        handler $pathname
+        handler ${pathname:A}
     elif [[ -d $pathname ]]; then
         if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
             error_header 301 "Location: http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
@@ -723,6 +729,9 @@ while :; do
     fi
 
     ( trap "ztcp -c; rmlock 2>/dev/null; exit" KILL TERM INT EXIT; trap '' PIPE; trap - CHLD HUP
+
+    # This won't really do much for us until fixed, see:
+    # http://www.zsh.org/mla/workers/2015/msg01675.html
     setopt err_return
 
     while :; do
@@ -730,10 +739,10 @@ while :; do
         # http://www.zsh.org/mla/users/2012/msg00816.html
         parse_request
         check_request
-        srv 2> >(sysread buff; [[ -n $buff ]] && log_err "${(f)buff}")
+        srv
 
         [[ $? != 0 || $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
-    done ) >&$fd &
+    done ) >&$fd 2> >(sysread buff; [[ -n $buff ]] && log_err "${(f)buff}") &
 
     conn_list+=$!
     ztcp -c $fd

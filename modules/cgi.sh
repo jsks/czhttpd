@@ -3,12 +3,14 @@
 # so it tends to go untested during updates. But it should work.
 # Maybe. Hopefully.
 
+# TODO: Status: 200 Ok
+
 # Declare our default variables
 : ${CGI_ENABLE:=0}
 : ${CGI_EXTS:="php"}
 : ${CGI_TIMEOUT=300}
 
-! typeset -f handler >/dev/null && function handler() { cgi_handler $* }
+function handler() { cgi_handler $* }
 
 readonly GATEWAY_INTERFACE="CGI/1.1"
 
@@ -16,21 +18,19 @@ function timeout() {
     setopt local_traps
     local pid1 pid2 pid_status
 
-    function TRAPCHLD() {
+    TRAPCHLD() {
         kill $pid1 $pid2 2>/dev/null
-        return 1
     }
 
     ${(z)1} &; pid1=$!
     sleep $2 &; pid2=$!
 
-    wait $pid1
+    wait $pid1 2>/dev/null
     pid_status=$?
     kill $pid2 2>/dev/null
 
-    return $pid_status
+    return pid_status
 }
-
 
 function cgi_handler() {
     if check_if_cgi $1; then
@@ -77,7 +77,13 @@ function exec_cgi() {
     coproc { timeout "$cmd $1" $CGI_TIMEOUT <<< $req_headers[msg-body] }
     pid=$!
 
-    while read -r -p line; do
+    if ! wait $pid; then
+        log_err "executing cgi script $1 failed"
+        error_header 500
+        return
+    fi
+
+    while read -t $CGI_TIMEOUT -r -p line; do
         [[ -z $line || $line == $'\r' ]] && break
         [[ $line =~ "Status:*" ]] && cgi_status_code=${line#Status: }
         cgi_head+=${line%$'\r'}
@@ -85,17 +91,13 @@ function exec_cgi() {
 
     if [[ -z ${(M)${cgi_head:l}:#content-type*} ]]; then
         log_err "cgi script $1 failed to return a mime-type"
-        return_header 500
+        # TODO: Handle this signal
+        kill $pid 2>/dev/null
+        error_header 500
         return
     fi
 
     log_f ${cgi_status_code:-"200"}
     return_header ${cgi_status_code:-"200 Ok"} "Transfer-Encoding: chunked" $cgi_head[@]
     send_chunk <&p
-
-    if ! wait $pid; then
-        log_err "executing cgi script $1 failed"
-        return_header 500
-        return
-    fi
 }

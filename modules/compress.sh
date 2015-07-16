@@ -14,7 +14,7 @@ function compression_init() {
     [[ $COMPRESS_MIN_SIZE != <-> ]] && { log_err "Invalid integer for COMPRESS_MIN_SIZE"; return 1 }
     [[ $COMPRESS_CACHE != [01] ]] && { log_err "Invalid integer for COMPRESS_CACHE"; return 1}
 
-    ! typeset -f send >/dev/null && function send() { compression_filter $* }
+    function send() { compression_filter $* }
 }
 
 function compression_filter() {
@@ -27,7 +27,7 @@ function compression_filter() {
             : >> $cache_file
             mklock $cache_file
 
-            if [[ ! -s ]]; then
+            if [[ ! -s $cache_file ]]; then
                 rm $COMPRESS_CACHE_DIR/${1:gs/\//.}-*.gz 2>/dev/null || :
                 gzip -$COMPRESS_LEVEL -c $1 > $cache_file
             fi
