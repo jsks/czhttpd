@@ -161,7 +161,8 @@ function chttp::return_headers() {
 
     str+="$__REQUEST\r\n"
 
-    [[ -z $__REQ_HEADERS[host] ]] && __REQ_HEADERS[host]="$__HOST"
+    [[ -z $__REQ_HEADERS[host] ]] && __REQ_HEADERS[host]="$__HOST:$__PORT"
+    [[ -z $__REQ_HEADERS[connection] ]] && __REQ_HEADERS[connection]="close"
     for i in ${(k)__REQ_HEADERS}; str+="$i: $__REQ_HEADERS[$i]\r\n"
 
     print -n "$str\r\n" >&$__fd 2>/dev/null

@@ -56,7 +56,7 @@ check "Connection: close" \
       --header 'Connection: close' 127.0.0.1:$PORT
 check "Keep alive enabled" \
        header_compare 'Connection: keep-alive' \
-       127.0.0.1:$PORT
+       --header 'Connection: keep-alive' 127.0.0.1:$PORT
 
 rm $TESTROOT/index.html
 
@@ -68,7 +68,7 @@ reload_conf
 
 check "Keep alive disabled" \
        header_compare 'Connection: close' \
-       127.0.0.1:$PORT
+       --header 'Connection: keep-alive' 127.0.0.1:$PORT
 check "Check maxed out connections" \
        http_code 503 \
        127.0.0.1:$PORT

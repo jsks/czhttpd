@@ -372,11 +372,11 @@ function parse_request() {
         read -t $HTTP_RECV_TIMEOUT -r -u $fd line
         [[ -z $line || $line == $'\r' ]] && break
 
-        for key value in ${(s.:.)line%$'\r'}; do
+        for key value in ${(s.: .)line%$'\r'}; do
             # Malformed request
             [[ -z $key || -z $value ]] && { error_header 400; return 1 }
 
-            req_headers[${(L)key}]="${(z)value}"
+            req_headers[${(L)key}]="${=value}"
         done
     done
 
