@@ -31,7 +31,7 @@ typeset -A CHTTP_RESP_HEADERS CHTTP_TIMES
 integer CHTTP_DOWNLOAD_SIZE
 
 typeset -a __ADD_HEADERS
-typeset __HOST __PORT __REQ_DATA __REQUEST
+typeset __HOST __PORT __REQ_DATA __REQUEST __CHUNKED
 integer __RECV_TIMEOUT=10
 
 integer __fd __verbosefd __outfd
@@ -47,6 +47,7 @@ chttp_client - simple http client
 USAGE: ./http_client [OPTIONS] HOST:PORT/[FILE,DIR]
 
 Options:
+    -c | --chunked  Send request message data chunked
     -d | --data     Data to send along with request. Does not
                     automatically set request method
     -h | --header   Additional header. May overwrite default headers
@@ -60,14 +61,14 @@ exit
 }
 
 function chttp::parse_args() {
-    unset __ADD_HEADERS __REQ_DATA
+    unset __ADD_HEADERS __REQ_DATA __CHUNKED
     typeset -ga __ADD_HEADERS
     typeset -g __REQ_DATA
 
     local -A opts
     local i method version
 
-    zparseopts -D -A  opts -verbose v -header+:=__ADD_HEADERS h+:=__ADD_HEADERS -method: m: -http: t: -output: o: -data: d: -help || ctcp::error "Failed to parse args"
+    zparseopts -D -A  opts -verbose v -header+:=__ADD_HEADERS h+:=__ADD_HEADERS -method: m: -http: t: -output: o: -data: d: -help -chunked c || ctcp::error "Failed to parse args"
 
     for i in ${(k)opts}; do
         case $i in
@@ -86,6 +87,8 @@ function chttp::parse_args() {
                 __REQ_DATA="$opts[$i]";;
             ("--help")
                 chttp::help;;
+            ("--chunked"|"-c")
+                __CHUNKED=1;;
         esac
     done
 
@@ -119,24 +122,61 @@ function chttp::connect() {
 }
 
 function chttp::send_request() {
-    local str i
+    local -A __REQ_HEADERS
     local -F start stop
-     
-    start=$EPOCHREALTIME 
+    local k v
 
-    str+="$__REQUEST\r\n"
-    str+="Host: $__HOST\r\n"
-    
-    for i in $__ADD_HEADERS; [[ $i != '--header' ]] && str+="$i\r\n"
+    start=$EPOCHREALTIME
 
-    if [[ -n $__REQ_DATA && -z ${(SM)__ADD_HEADERS#(#i)content-length} ]]; then
-        str+="Content-length: ${#__REQ_DATA}\r\n"
+    for k v  in ${(ws.:.)__ADD_HEADERS[@]}; do
+        [[ $k != "--header" ]] && __REQ_HEADERS[${(L)k}]="$v"
+    done
+
+    if [[ -n $__REQ_DATA ]]; then
+        if (( __CHUNKED )); then
+            if [[ -z $__REQ_HEADERS[Transfer-encoding] ]]; then
+                __REQ_HEADERS[Transfer-encoding]="chunked"
+            fi
+
+            chttp::return_headers
+            chttp::send_chunk <<< $__REQ_DATA >&$__fd
+        else
+            if [[ -z $__REQ_HEADERS[content-length] ]]; then
+                __REQ_HEADERS[Content-length]="${#__REQ_DATA}"
+            fi
+
+            chttp::return_headers
+            print -n "$__REQ_DATA" >&$__fd 2>/dev/null
+        fi
+    else
+        chttp::return_headers
     fi
 
-    print -n "$str\r\n$__REQ_DATA" >&$__fd 2>/dev/null
-    
     stop=$EPOCHREALTIME
     CHTTP_TIMES[send]="$start,$stop"
+}
+
+function chttp::return_headers() {
+    local str i
+
+    str+="$__REQUEST\r\n"
+
+    [[ -z $__REQ_HEADERS[host] ]] && __REQ_HEADERS[host]="$__HOST"
+    for i in ${(k)__REQ_HEADERS}; str+="$i: $__REQ_HEADERS[$i]\r\n"
+
+    print -n "$str\r\n" >&$__fd 2>/dev/null
+}
+
+function chttp::send_chunk() {
+    local buff
+
+    while sysread buff; do
+        printf '%x\r\n' "${#buff}"
+        printf '%s\r\n' "$buff"
+    done
+
+    printf '%x\r\n' "0"
+    printf '\r\n'
 }
 
 function chttp::read_response() {
@@ -169,11 +209,20 @@ function chttp::read_response() {
 function chttp::read_body() {
     unset CHTTP_DOWNLOAD_SIZE; typeset -gi CHTTP_DOWNLOAD_SIZE
     local line
-    local -i count chunk_size offset
+    local -i bufsize count chunk_size offset
 
     if [[ $CHTTP_RESP_HEADERS[content-length] > 0 ]]; then
-        sysread -o $__outfd -t $__RECV_TIMEOUT -i $__fd -s $CHTTP_RESP_HEADERS[content-length] -c CHTTP_DOWNLOAD_SIZE
-        (( count > CHTTP_RESP_HEADERS[content-length] )) && return 1
+        [[ $CHTTP_RESP_HEADERS[content-length] != <-> ]] && return 1
+
+        bufsize=$CHTTP_RESP_HEADERS[content-length]
+        while :; do
+            sysread -o $__outfd -t $__RECV_TIMEOUT -i $__fd -s $bufsize -c count
+            CHTTP_DOWNLOAD_SIZE+=$count
+
+            (( ! (bufsize-=count) )) && break
+        done
+
+        (( CHTTP_DOWNLOAD_SIZE != CHTTP_RESP_HEADERS[content-length] )) && return 1
     elif [[ $CHTTP_RESP_HEADERS[transfer-encoding] == "chunked" ]]; then
         while :; do
             offset=2
@@ -227,6 +276,8 @@ function chttp::print_times() {
 }
 
 if [[ $ZSH_EVAL_CONTEXT == 'toplevel' ]]; then
+    setopt err_return
+
     trap "ztcp -c; exit" INT TERM KILL EXIT ZERR
 
     chttp::parse_args $*
