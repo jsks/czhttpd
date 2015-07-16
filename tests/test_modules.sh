@@ -1,6 +1,18 @@
 # url_rewrite
 <<EOF > $CONF
+MAX_CONN=1
+PORT=$PORT
+IP_REDIRECT="127.0.0.1"
+HTTP_KEEP_ALIVE=1
+HTTP_TIMEOUT=2
+HTTP_RECV_TIMEOUT=1
+INDEX_FILE=index.html
 HIDDEN_FILES=1
+FOLLOW_SYMLINKS=0
+CACHE=1
+CACHE_DIR="/tmp/.czhttpd-$$"
+LOG_FILE=/dev/null
+
 COMPRESS=0
 CGI_ENABLE=0
 DEBUG=0
@@ -27,6 +39,8 @@ COMPRESS=1
 COMPRESS_TYPES="text/html,text/plain"
 COMPRESS_LEVEL=6
 COMPRESS_MIN_SIZE=100
+COMPRESS_CACHE=1
+COMPRESS_CACHE_DIR="/tmp/.czhttpd-$$"
 source ../modules/compress.sh
 EOF
 reload_conf
@@ -43,7 +57,13 @@ check "Compress header check" \
        header_compare 'Content-Encoding: gzip' \
        --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT/compress.txt
 check "Compress dir request" \
+       header_compare 'Content-Encoding: gzip' \
+       --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT
+check "Cache hit for dir request" \
        http_code 200 \
+       --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT
+check "Cache hit check header" \
+       header_compare 'Content-Length: [0-9]' \
        --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT
 check "Check compressed file integrity" \
        file_compare $TESTROOT/compress.txt.gz \

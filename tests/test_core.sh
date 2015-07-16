@@ -1,10 +1,10 @@
 <<EOF > $CONF
 MAX_CONN=12
-PORT=8080
-IP_REDIRECT="[0-9*].[0-9*].[0-9*].[0-9*]"
+PORT=$PORT
+IP_REDIRECT="127.0.0.1"
 HTTP_KEEP_ALIVE=1
-HTTP_TIMEOUT=30
-HTTP_RECV_TIMEOUT=5
+HTTP_TIMEOUT=2
+HTTP_RECV_TIMEOUT=1
 INDEX_FILE=index.html
 HIDDEN_FILES=0
 FOLLOW_SYMLINKS=0
@@ -36,9 +36,12 @@ check "Redirection" \
 check "Incomplete request line" \
        http_code 400 \
        --method " " 127.0.0.1:$PORT
-check "Dot file request" \
+check "Dot file disabled request" \
        http_code 403 \
        127.0.0.1:$PORT/.dot.txt
+check "Symbolic link disabled request" \
+       http_code 403 \
+       127.0.0.1:$PORT/link
 check "Nonexistent file/dir" \
        http_code 404 \
        127.0.0.1:$PORT/foo
@@ -48,6 +51,9 @@ check "Test unknown method" \
 check "HTTP/1.0 request" \
        http_code 505 \
        --http 1.0 127.0.0.1:$PORT
+check "Connection: close" \
+      header_compare 'Connection: close' \
+      --header 'Connection: close' 127.0.0.1:$PORT
 check "Keep alive enabled" \
        header_compare 'Connection: keep-alive' \
        127.0.0.1:$PORT
@@ -77,12 +83,16 @@ CACHE=1
 EOF
 reload_conf
 
-ln -s $TESTROOT/file.txt $TESTROOT/link
-
-check "Request with cache" \
+check "Request to build cache" \
        http_code 200 \
        127.0.0.1:$PORT
-check "Hidden_files request" \
+check "Check http code cache hit" \
+       http_code 200 \
+       127.0.0.1:$PORT
+check "Check cache hit header" \
+       header_compare 'Content-length: [0-9]' \
+       127.0.0.1:$PORT
+check "Enabled hidden files request" \
        http_code 200 \
        127.0.0.1:$PORT/.dot.txt
 check "Request with symbolic link" \
@@ -91,13 +101,18 @@ check "Request with symbolic link" \
 check "Symbolic link integrity" \
        file_compare $TESTROOT/file.txt \
        127.0.0.1:$PORT/link
-check "Request body too large" \
+check "Fixed request body too large" \
        http_code 413 \
        --data 'Hello World!' 127.0.0.1:$PORT
-check "Request body smaller than content-length" \
+check "Fixed request body smaller than content-length" \
        http_code 400 \
        --data 'HH' --header 'Content-Length: 3' 127.0.0.1:$PORT
-check "Request body just right" \
+check "Fixed request body just right" \
        http_code 200 \
        --data 'HH' 127.0.0.1:$PORT
-unlink $TESTROOT/link
+check "Chunked request body too large" \
+       http_code 413 \
+       --chunked --data 'Hello World!' 127.0.0.1:$PORT
+check "Chunked request body just right" \
+       http_code 200 \
+       --chunked --data 'HH' 127.0.0.1:$PORT

@@ -1,4 +1,5 @@
 #!/bin/zsh
+# Testing script for czhttpd. Individual tests split into test_*.sh.
 
 autoload colors
 (( $terminfo[colors] >= 8 )) && colors
@@ -8,11 +9,11 @@ zmodload zsh/system
 
 setopt err_return
 
-integer debugfd
+integer debugfd COUNTER=1
 typeset -g PID
 
 function assert() {
-    if [[ $1 == $2 ]]; then
+    if [[ $2 =~ $1 ]]; then
         print "$fg[green]Passed$fg[white]"
     else
         print "$fg[red]Failed$fg[white]"
@@ -29,14 +30,20 @@ function help() {
 czhttpd test script
 
 Options:
-    -l | --log      Redirect czhttpd output to given file
-    -p | --port     Port to pass to czhttpd (Default: 8080)
-    -v | --verbose  Enable verbose output
+    -l | --log          Redirect czhttpd output to given file
+    -p | --port         Port to pass to czhttpd (Default: 8080)
+    -s | --stepwise     Pause after specified test. Argument can also be a comma
+                        deliminated list of tests or ranges of tests
+                        (ex: -s 2,4,6-9)
+    -v | --verbose      Enable verbose output
 EOF
 
 exit
 }
 
+###
+# You know what would make a lot of sense? To use curl. But why do that when we
+# can write our own nonconformant http client!
 function get_http() {
     chttp::parse_args $*
 
@@ -46,13 +53,28 @@ function get_http() {
     ztcp -c
 }
 
+###
+# Makes a request to our server and tests the output. Comparisons are a simple
+# pass or fail.
+#   Available to test:
+#       - file_compare
+#       - header_compare
+#       - http_code
+#       - size_download
+#
+#   @Args -> $1 Description string for the test
+#            $2 Type of comparison
+#            $3 Expected value (can be a pattern)
+#            $4 Arguments to pass to our http_client (ex url)
+#
+# Welcome to shell scripting!
 function check() {
     local output
 
-    output="$TESTROOT/${@[-1]:t}.output"
+    output="$TESTTMP/${@[-1]:t}.output"
     get_http --output $output $@[4,-1]
 
-    print -n "$fg[blue]($3)$fg[white] $1 $ret[url_effective]..."
+    print -n "$fg[cyan]$COUNTER. $fg[blue]($3)$fg[white] $1 $ret[url_effective]..."
     case $2 in
         ("file_compare")
             assert $(md5 -q ${3:A}) $(md5 -q $output);;
@@ -68,9 +90,9 @@ function check() {
     esac
 
     (( VERBOSE )) && info
-    (( STEPWISE )) && { read -k '?Press any key to continue...' }
+    [[ -n ${STEPWISE[(r)$COUNTER]} ]] && { read -k '?Press any key to continue...' }
 
-    rm $output
+    (( COUNTER++ ))
 }
 
 function info() {
@@ -113,17 +135,28 @@ function reload_conf() {
 function cleanup() {
     setopt noerr_return
     kill -15 $PID
-    rm -rf $TESTROOT
+    rm -rf $TESTTMP $TESTROOT
 }
 
-zparseopts -D -A opts -verbose v -stepwise s -log: l: -port: p: -help h || error "Failed to parse args"
+zparseopts -D -A opts -verbose v -stepwise: s: -log: l: -port: p: -help h || error "Failed to parse args"
 
 for i in ${(k)opts}; do
+    print $opts[$i]
     case $i in
         ("--stepwise"|"-s")
-            typeset -g STEPWISE=1;;
+            typeset -a STEPWISE
+
+            for i in ${(s.,.)opts[$i]}; do
+                if [[ -n ${(SM)i#-} ]]; then
+                    for j in {${i[(ws.-.)1]}..${i[(ws.-.)2]}}; do
+                        [[ $j == <-> ]] && STEPWISE+=$j
+                    done
+                elif [[ $i == <-> ]]; then
+                    STEPWISE+=($i)
+                fi
+            done;;
         ("--verbose"|"-v")
-            typeset -g VERBOSE=1;;
+            VERBOSE=1;;
         ("--log"|"-l")
             [[ -f $opts[$i] ]] && exec {debugfd}>>$opts[$i] || error "Invalid logfile";;
         ("--port"|"-p")
@@ -141,6 +174,9 @@ done
 
 trap "cleanup 2>/dev/null; exit" INT TERM KILL EXIT ZERR
 
+TESTTMP=/tmp/cztest-$$
+mkdir "$TESTTMP"
+
 TESTROOT=/tmp/czhttpd-test
 mkdir $TESTROOT
 
@@ -150,6 +186,7 @@ CONF="$TESTROOT/cz.conf"
 mkdir $TESTROOT/dir
 print hello > $TESTROOT/file.txt
 print goodbye > $TESTROOT/.dot.txt
+ln -s $TESTROOT/file.txt $TESTROOT/link
 
 start_server
 heartbeat
