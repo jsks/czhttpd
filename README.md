@@ -59,8 +59,9 @@ kill -HUP <czhttpd pid>
 How czhttpd handles modules really needs to be rethought. Further laundry list:
 - [ ] `debug.sh` needs to be finished 
 - [ ] ip matching should be reintroduced as a new module 
-- [ ] parsing message bodies needs to be reworked
-- [ ] http_client should be expanded to handle chunked requests
+- [ ] error messages from http_client
+- [X] parsing message bodies needs to be reworked
+- [X] http_client should be expanded to handle chunked requests
 
 ---
 
