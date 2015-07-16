@@ -55,6 +55,9 @@ czhttpd will automatically reload its configuration file and gracefully handle a
 kill -HUP <czhttpd pid>
 ```
 
+### TODO
+How czhttpd handles modules really needs to be rethought. Related, `debug.sh` needs to be finished and ip matching should be reintroduced as a new module.
+
 ---
 
 I am not much of a programmer especially with zsh so if you have any suggestions or added features please feel free to contribute!
