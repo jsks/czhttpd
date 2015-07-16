@@ -124,12 +124,12 @@ function chttp::connect() {
 function chttp::send_request() {
     local -A __REQ_HEADERS
     local -F start stop
-    local k v
+    local i
 
     start=$EPOCHREALTIME
 
-    for k v  in ${(ws.:.)__ADD_HEADERS[@]}; do
-        [[ $k != "--header" ]] && __REQ_HEADERS[${(L)k}]="$v"
+    for i  in $__ADD_HEADERS; do
+        [[ $i != "--header" ]] && __REQ_HEADERS[${(L)i[(ws.:.)1]}]="${i[(ws.:.)2]}"
     done
 
     if [[ -n $__REQ_DATA ]]; then
@@ -142,7 +142,7 @@ function chttp::send_request() {
             chttp::send_chunk <<< $__REQ_DATA >&$__fd
         else
             if [[ -z $__REQ_HEADERS[content-length] ]]; then
-                __REQ_HEADERS[Content-length]="${#__REQ_DATA}"
+                __REQ_HEADERS[content-length]="${#__REQ_DATA}"
             fi
 
             chttp::return_headers
