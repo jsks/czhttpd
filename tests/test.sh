@@ -109,7 +109,7 @@ function info() {
 }
 
 function start_server() {
-    zsh ../czhttpd -p $PORT -c $CONF $TESTROOT >&$debugfd &
+    zsh $SRC_DIR/czhttpd -p $PORT -c $CONF $TESTROOT >&$debugfd &
     PID=$!
 }
 
@@ -170,7 +170,9 @@ done
 : ${VERBOSE:=0}
 [[ $debugfd  == 0 ]] && exec {debugfd}>/dev/null
 
-. ../http_client
+SRC_DIR=$(git rev-parse --show-toplevel)
+
+source $SRC_DIR/http_client
 
 trap "cleanup 2>/dev/null; exit" INT TERM KILL EXIT ZERR
 
@@ -191,7 +193,7 @@ ln -s $TESTROOT/file.txt $TESTROOT/link
 start_server
 heartbeat
 
-for i in ${1:-test_*.sh}; do
+for i in ${1:-$SRC_DIR/tests/test_*.sh}; do
     print "$fg[magenta]$i$fg[white]"
-    . ./$i
+    source $i
 done

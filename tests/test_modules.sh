@@ -19,7 +19,7 @@ DEBUG=0
 URL_REWRITE=1
 typeset -gA URL_PATTERNS
 URL_PATTERNS=( "/file.txt" "/.dot.txt" )
-source ../modules/url_rewrite.sh
+source $SRC_DIR/modules/url_rewrite.sh
 EOF
 reload_conf
 
@@ -41,7 +41,7 @@ COMPRESS_LEVEL=6
 COMPRESS_MIN_SIZE=100
 COMPRESS_CACHE=1
 COMPRESS_CACHE_DIR="/tmp/.czhttpd-$$"
-source ../modules/compress.sh
+source $SRC_DIR/modules/compress.sh
 EOF
 reload_conf
 
@@ -78,7 +78,7 @@ DEBUG=0
 CGI_ENABLE=1
 CGI_EXTS="sh"
 CGI_TIMEOUT=2
-source ../modules/cgi.sh
+source $SRC_DIR/modules/cgi.sh
 EOF
 reload_conf
 
