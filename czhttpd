@@ -43,10 +43,12 @@ setopt posix_jobs bare_glob_qual local_options extended_glob
 typeset -A MTYPES HTTP_CODES
 typeset -a LOG_FORMAT
 
-typeset -g CONFIG DOCROOT
+typeset CONFIG DOCROOT STDOUT
 
 typeset -A req_headers
 typeset -a conn_list
+
+integer logfd
 
 HTTP_CODES=( 200    "Ok"
              301    "Moved Permanently"
@@ -96,33 +98,48 @@ function ip_addr() {
 }
 
 ### Logging/info functions
-# It would be quicker to use a file descriptor for LOG_FILE; h/o, we can't
-# guarantee that every subshell will receive a copy (ex: command substitution).
-# Only alternative: throw away stderr from `srv`
-
 function error() {
     local cur_time
     setopt multios
     get_time
 
-    print "[$cur_time] Fatal Error: $*" >&2 >>$LOG_FILE
+    print "[$cur_time] Fatal Error: $*" >&2 >&$logfd
 
     cleanup 2>/dev/null
     exit 113
 }
 
+###
+# Check that we have a valid fd and reset if necessary (ex: logging within
+# process substitution)
 function log_f() {
     local cur_time
     get_time
 
-    print "${(e@)LOG_FORMAT} $*" >>$LOG_FILE
+    if ! print -nu $logfd 2>/dev/null; then
+        if (( STDOUT )); then
+            exec {logfd}>&1
+        else
+            exec {logfd}>>$LOG_FILE
+        fi
+    fi
+
+    print "${(e@)LOG_FORMAT} $*" >&$logfd
 }
 
 function log_err() {
     local cur_time
     get_time
 
-    print "${(e@)LOG_FORMAT} Error -> $*" >>$LOG_FILE
+    if ! print -nu $logfd 2>/dev/null; then
+        if (( STDOUT )); then
+            exec {logfd}>&1
+        else
+            exec {logfd}>>$LOG_FILE
+        fi
+    fi
+
+    print "${(e@)LOG_FORMAT} Error -> $*" >&$logfd
 }
 
 function help() {
@@ -167,21 +184,21 @@ function parse_conf() {
         fi
     done
 
-    if [[ -n $_LOG_FILE ]]; then
-        LOG_FILE="$_LOG_FILE"
-        unset _LOG_FILE
+    if (( STDOUT )); then
+        exec {logfd}>&1
     elif [[ -n $LOG_FILE ]]; then
-        if [[ $LOG_FILE == "/dev/null" || $LOG_FILE == "/dev/tty" ]]; then
+        if [[ $LOG_FILE == "/dev/null" ]]; then
             :
-        elif [[ -e $LOG_FILE && ! -f $LOG_FILE || ! -w $LOG_FILE ]]; then
+        elif [[ -e $LOG_FILE && (! -f $LOG_FILE || ! -w $LOG_FILE) ]]; then
             error "Invalid logging file: $LOG_FILE"
         elif [[ ! -w ${LOG_FILE:h} ]]; then
             error "Cannot create logging file: $LOG_FILE"
         fi
 
         : >> $LOG_FILE
+        exec {logfd}>>$LOG_FILE
     else
-        LOG_FILE="/dev/null"
+        exec {logfd}>/dev/null
     fi
 }
 
@@ -201,7 +218,7 @@ function parse_args() {
             ("-p")
                 _PORT="$opts[-p]";;
             ("-v")
-                _LOG_FILE=/dev/tty;;
+                STDOUT=1;;
         esac
     done
 
@@ -679,7 +696,7 @@ function TRAPHUP() {
 # Declare our default config vars in a function so that we can later reload
 function cz_init() {
     LOG_FORMAT=(  '[$cur_time]'
-                  '[pid: ${sysparams[pid]}]'
+                  '[pid: ${pid:-$sysparams[pid]}]'
                   '$client_ip'
                   '$req_headers[method]'
                   '$req_headers[url]'
@@ -779,7 +796,9 @@ while :; do
         srv
 
         [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
-    done ) >&$fd 2> >(sysread buff; [[ -n $buff ]] && log_err "${(f)buff}") &
+    done ) >&$fd 2> >(pid=$sysparams[ppid]; \
+                      sysread buff; \
+                      [[ -n $buff ]] && log_err "${(f)buff}") &
 
     conn_list+=$!
     ztcp -c $fd

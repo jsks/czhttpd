@@ -109,7 +109,7 @@ function info() {
 }
 
 function start_server() {
-    zsh $SRC_DIR/czhttpd -p $PORT -c $CONF $TESTROOT >&$debugfd &
+    zsh $SRC_DIR/czhttpd -v -p $PORT -c $CONF $TESTROOT >&$debugfd &
     PID=$!
 }
 
@@ -141,7 +141,6 @@ function cleanup() {
 zparseopts -D -A opts -verbose v -stepwise: s: -log: l: -port: p: -help h || error "Failed to parse args"
 
 for i in ${(k)opts}; do
-    print $opts[$i]
     case $i in
         ("--stepwise"|"-s")
             typeset -a STEPWISE
@@ -158,9 +157,18 @@ for i in ${(k)opts}; do
         ("--verbose"|"-v")
             VERBOSE=1;;
         ("--log"|"-l")
-            [[ -f $opts[$i] ]] && exec {debugfd}>>$opts[$i] || error "Invalid logfile";;
+            if [[ -f $opts[$i] ]]; then
+                : >> $opts[$i]
+                exec {debugfd}>>$opts[$i]
+            else
+                error "Invalid logfile"
+            fi;;
         ("--port"|"-p")
-            [[ $opts[$i] == <-> ]] && typeset -g PORT=$opts[$i] || error "Invalid port $opts[$i]";;
+            if [[ $opts[$i] == <-> ]]; then
+                typeset -g PORT=$opts[$i]
+            else
+                error "Invalid port $opts[$i]"
+            fi;;
         ("--help"|"-h")
             help;;
     esac
