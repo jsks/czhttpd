@@ -568,12 +568,16 @@ function send_file() {
         local -i filefd
         exec {filefd}<$1
 
-        # TODO: handle sysread return values
-        while sysread -i $filefd -o 1; do
-            continue
-        done
-
-        exec {filefd}>&-
+        { while :; do
+            sysread -i $filefd -o 1 || {
+                case $? in
+                    (5)
+                        return 0;;
+                    (^0)
+                        return 1;;
+                esac
+            }
+        done } always { exec {filefd}>&- }
     fi
 }
 
