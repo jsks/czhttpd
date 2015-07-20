@@ -17,6 +17,7 @@
 #       CHTTP_RESP_HEADERS
 #       CHTTP_TIMES
 #       CHTTP_DOWNLOAD_SIZE
+#       CHTTP_URL
 #####
 
 for __i in "zsh/net/tcp" "zsh/system" "zsh/datetime" "zsh/zselect"; do
@@ -28,6 +29,7 @@ done
 setopt hist_subst_pattern extended_glob nomultibyte
 
 typeset -A CHTTP_RESP_HEADERS CHTTP_TIMES
+typeset CHTTP_URL
 integer CHTTP_DOWNLOAD_SIZE
 
 typeset -a __ADD_HEADERS
@@ -43,14 +45,15 @@ function chttp::error() {
 
 function chttp::help() {
 <<EOF
-chttp_client - simple http client
-USAGE: ./http_client [OPTIONS] HOST:PORT/[FILE,DIR]
+http_client
+USAGE: ./http_client [OPTIONS] HOST[:PORT]/[FILE,DIR]
 
 Options:
     -c | --chunked  Send request message data chunked
     -d | --data     Data to send along with request. Does not
                     automatically set request method
-    -h | --header   Additional header. May overwrite default headers
+    -h | --header   Additional header. Can be repeated and may overwrite
+                    default headers
     -t | --http     HTTP version to use
     -m | --method   Method used in request. Will not check if valid
     -o | --output   Output download to given file (default: stdout)
@@ -92,13 +95,19 @@ function chttp::parse_args() {
         esac
     done
 
-    [[ $__verbosefd == 0 ]] && exec {__verbosefd}>/dev/null
-    [[ $__outfd == 0 ]] && exec {__outfd}>&1
+    (( ! $__verbosefd )) && exec {__verbosefd}>/dev/null
+    (( ! $__outfd )) && exec {__outfd}>&1
+
+    [[ -z $1 ]] && chttp::error "Failed to provide url"
+    CHTTP_URL="$1"
 
     # Pattern matching, the tenth circle of hell
     __HOST="${1[(ws.:.)1]%/*}"
     __PORT="${1:s/(?~:)#[:]#//:s/\/*//}"
     __REQUEST="${method:-GET} ${1:s/(?~\/)#\/#/\//} HTTP/${version:-1.1}"
+
+    # Default port
+    : ${__PORT:=80}
 }
 
 function chttp::connect() {
@@ -108,7 +117,7 @@ function chttp::connect() {
 
     repeat 3; do
         start=$EPOCHREALTIME
-        ztcp $__HOST ${__PORT:-80} 2>/dev/null
+        ztcp $__HOST $__PORT 2>/dev/null
         stop=$EPOCHREALTIME
 
         if [[ -n $REPLY ]] ; then
@@ -118,7 +127,7 @@ function chttp::connect() {
         fi
     done
 
-    chttp::error "Unable to connect to $__HOST:${__PORT:-80}"
+    chttp::error "Unable to connect to $__HOST:$__PORT"
 }
 
 function chttp::send_request() {
@@ -159,10 +168,10 @@ function chttp::send_request() {
 function chttp::return_headers() {
     local str i
 
-    str+="$__REQUEST\r\n"
-
     [[ -z $__REQ_HEADERS[host] ]] && __REQ_HEADERS[host]="$__HOST:$__PORT"
     [[ -z $__REQ_HEADERS[connection] ]] && __REQ_HEADERS[connection]="close"
+
+    str="$__REQUEST\r\n"
     for i in ${(k)__REQ_HEADERS}; str+="$i: $__REQ_HEADERS[$i]\r\n"
 
     print -n "$str\r\n" >&$__fd 2>/dev/null

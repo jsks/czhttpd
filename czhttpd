@@ -117,6 +117,7 @@ function log_f() {
     get_time
 
     if ! print -nu $logfd 2>/dev/null; then
+        # Note: don't do `a && b || c`
         if (( STDOUT )); then
             exec {logfd}>&1
         else
@@ -279,7 +280,7 @@ function mime_type() {
     local tail file_mime
 
     tail="${(L)1:t}"
-    if (( $+MTYPES[${tail#*.}] )); then
+    if [[ -n $MTYPES[${tail#*.}] ]]; then
         mtype+="$MTYPES[${tail#*.}]"
     else
         if which file >/dev/null; then
@@ -351,7 +352,7 @@ function urldecode() {
 function http_listen() {
     typeset -g listenfd
 
-    if (( $PORT > 1024 )); then
+    if (( PORT > 1024 )); then
         if [[ $PORT != ${$(ztcp -L)[(w)4]} || -z $listenfd ]]; then
             ztcp -c
             ztcp -l $PORT 2>/dev/null || error "Could not bind to port $PORT"
@@ -503,10 +504,10 @@ function return_header() {
 
     resp_headers+="$SERVER_PROTOCOL $1\r\n"
 
-    if [[ $HTTP_KEEP_ALIVE == 0 ]]; then
-        resp_headers+="Connection: close\r\n"
-    else
+    if (( HTTP_KEEP_ALIVE )); then
         resp_headers+="Connection: ${req_headers[connection]:-keep-alive}\r\n"
+    else
+        resp_headers+="Connection: close\r\n"
     fi
 
     resp_headers+="Date: $cur_time GMT\r\n"
@@ -539,7 +540,7 @@ function build_index() {
 
     [[ "${1%/}" != "${DOCROOT%/}" ]] && html_fragment '../'
 
-    if (( $HIDDEN_FILES )); then
+    if (( HIDDEN_FILES )); then
         for i in .*(-/NrT) .*(-.Nr); html_fragment "$i"
     fi
 
@@ -756,7 +757,7 @@ function cz_init() {
                  default   application/octet-stream )
     fi
 
-    if (( $CACHE )) && [[ ! -d $CACHE_DIR ]]; then
+    if (( CACHE )) && [[ ! -d $CACHE_DIR ]]; then
         mkdir $CACHE_DIR || error "Failed to create cache dir"
     fi
 }
@@ -772,7 +773,7 @@ while :; do
     { zselect -r $listenfd && ztcp -a $listenfd } || continue
     fd=$REPLY
 
-    if (( ${#conn_list} >= $MAX_CONN )); then
+    if (( ${#conn_list} >= MAX_CONN )); then
         error_header 503 >&$fd
         ztcp -c $fd
         continue
