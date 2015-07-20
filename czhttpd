@@ -622,21 +622,13 @@ function __handler() {
 
         send $1
     else
-        if (( $CACHE )); then
-            local cache_file
-            local -a mtime
-
-            stat -A mtime +mtime $1
-            cache_file="${CACHE_DIR}/${1//\//}-$mtime.html"
-            : >> $cache_file
-            mklock $cache_file
-
-            if [[ ! -s $cache_file ]]; then
-                rm $CACHE_DIR/${1//\//}-*.html || :
+        if (( CACHE )); then
+            local cache_file="${CACHE_DIR}/${1//\//}.html"
+            if [[ $cache_file -ot $1 || ! -f $cache_file ]]; then
+                mklock $cache_file
                 build_index $1 > $cache_file
+                rmlock
             fi
-
-            rmlock
 
             { cd $CACHE_DIR; handler ${cache_file:t} } always { cd $DOCROOT }
         else

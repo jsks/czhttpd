@@ -22,17 +22,13 @@ function compression_filter() {
 
     if check_if_compression $1; then
         if [[ $COMPRESS_CACHE == "1" && -f $1 ]]; then
-            local cache_file="$COMPRESS_CACHE_DIR/${1:gs/\//}-$(stat +mtime $1).gz"
+            local cache_file="$COMPRESS_CACHE_DIR/${1:gs/\//}.gz"
 
-            : >> $cache_file
-            mklock $cache_file
-
-            if [[ ! -s $cache_file ]]; then
-                rm $COMPRESS_CACHE_DIR/${1:gs/\//.}-*.gz 2>/dev/null || :
+            if [[ $cache_file -ot $1 || ! -f $cache_file ]]; then
+                mklock $cache_file
                 gzip -$COMPRESS_LEVEL -c $1 > $cache_file
+                rmlock $cache_file
             fi
-
-            rmlock
 
             return_header "200 Ok" "Content-type: ${mtype:-application:octet-stream}; charset=UTF-8" "Content-Encoding: gzip" "Content-Length: $(stat -L +size $cache_file)"
             send_file $cache_file
