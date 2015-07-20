@@ -113,6 +113,12 @@ function start_server() {
     PID=$!
 }
 
+function stop_server() {
+    kill -15 $PID
+    sleep 0.1
+    kill -0 $pid 2>/dev/null && return 1 || return 0
+}
+
 function heartbeat() {
     repeat 3; do
         sleep 0.1
@@ -134,7 +140,7 @@ function reload_conf() {
 
 function cleanup() {
     setopt noerr_return
-    kill -15 $PID
+    stop_server
     rm -rf $TESTTMP $TESTROOT
 }
 

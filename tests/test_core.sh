@@ -52,13 +52,30 @@ check "HTTP/1.0 request" \
        http_code 505 \
        --http 1.0 127.0.0.1:$PORT
 check "Connection: close" \
-      header_compare 'Connection: close' \
-      --header 'Connection: close' 127.0.0.1:$PORT
+       header_compare 'Connection: close' \
+       --header 'Connection: close' 127.0.0.1:$PORT
 check "Keep alive enabled" \
        header_compare 'Connection: keep-alive' \
        --header 'Connection: keep-alive' 127.0.0.1:$PORT
 
 rm $TESTROOT/index.html
+
+stop_server
+TESTROOT=$TESTROOT/file.txt
+start_server
+heartbeat
+
+check "Check serving single file" \
+       http_code 200 \
+       127.0.0.1:$PORT
+check "Check integrity for serving single file" \
+       file_compare $TESTROOT \
+       127.0.0.1:$PORT
+
+stop_server
+TESTROOT=/tmp/czhttpd-test
+start_server
+heartbeat
 
 <<EOF > $CONF
 MAX_CONN=0

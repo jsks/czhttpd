@@ -650,7 +650,7 @@ function __srv() {
     [[ $HIDDEN_FILES != "1" && ${pathname:t} == .* ]] && { error_header 403; return }
     [[ $FOLLOW_SYMLINKS != "1" && -h ${pathname%/} ]] && { error_header 403; return }
 
-    { if [[ -f $pathname ]]; then
+    { if [[ -f ${pathname%/} ]]; then
         handler ${pathname:A}
     elif [[ -d $pathname ]]; then
         if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
