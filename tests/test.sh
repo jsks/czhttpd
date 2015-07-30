@@ -9,13 +9,14 @@ zmodload zsh/system
 
 setopt err_return
 
-integer debugfd COUNTER=1
+integer debugfd COUNTER=1 RET
 typeset -g PID
 
 function assert() {
     if [[ $2 =~ $1 ]]; then
         print "$fg[green]Passed$fg[white]"
     else
+        RET=1
         print "$fg[red]Failed$fg[white]"
     fi
 }
@@ -109,6 +110,8 @@ function info() {
 }
 
 function start_server() {
+    setopt noerr_return
+
     zsh $SRC_DIR/czhttpd -v -p $PORT -c $CONF $TESTROOT >&$debugfd &
     PID=$!
 }
@@ -188,7 +191,7 @@ SRC_DIR=$(git rev-parse --show-toplevel)
 
 source $SRC_DIR/http_client
 
-trap "cleanup 2>/dev/null; exit" INT TERM KILL EXIT ZERR
+trap "sleep 0.1; cleanup 2>/dev/null; exit" INT TERM KILL EXIT ZERR
 
 TESTTMP=/tmp/cztest-$$
 mkdir "$TESTTMP"
@@ -197,10 +200,29 @@ TESTROOT=/tmp/czhttpd-test
 mkdir $TESTROOT
 
 CONF="$TESTROOT/cz.conf"
-: > $CONF
+<<EOF > $CONF
+DEBUG=1
+source $SRC_DIR/modules/debug.sh
+
+MAX_CONN=1
+PORT=$PORT
+IP_REDIRECT="127.0.0.1"
+HTTP_KEEP_ALIVE=1
+HTTP_TIMEOUT=2
+HTTP_RECV_TIMEOUT=1
+INDEX_FILE=index.html
+HIDDEN_FILES=0
+FOLLOW_SYMLINKS=0
+CACHE=0
+CACHE_DIR="/tmp/.czhttpd-$$"
+LOG_FILE=/dev/null
+EOF
 
 mkdir $TESTROOT/dir
+print hejsan > $TESTROOT/index.html
 print hello > $TESTROOT/file.txt
+print hallå > $TESTROOT/file_pröva.txt
+print space > $TESTROOT/file\ space.txt
 print goodbye > $TESTROOT/.dot.txt
 ln -s $TESTROOT/file.txt $TESTROOT/link
 
@@ -211,3 +233,6 @@ for i in ${1:-$SRC_DIR/tests/test_*.sh}; do
     print "$fg[magenta]$i$fg[white]"
     source $i
 done
+
+# Allow all tests to finish, but return w/ err if necessary
+return ${RET:-0}

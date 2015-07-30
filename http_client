@@ -104,7 +104,7 @@ function chttp::parse_args() {
     # Pattern matching, the tenth circle of hell
     __HOST="${1[(ws.:.)1]%/*}"
     __PORT="${1:s/(?~:)#[:]#//:s/\/*//}"
-    __REQUEST="${method:-GET} ${1:s/(?~\/)#\/#/\//} HTTP/${version:-1.1}"
+    __REQUEST="${method:-GET} $(chttp::urlencode ${1:s/(?~\/)#\/#/\//}) HTTP/${version:-1.1}"
 
     # Default port
     : ${__PORT:=80}
@@ -128,6 +128,19 @@ function chttp::connect() {
     done
 
     chttp::error "Unable to connect to $__HOST:$__PORT"
+}
+
+function chttp::urlencode() {
+    for i in ${(s::)1}; do
+        case "$i" in
+            ([-._/~A-Za-z0-9])
+                printf '%s' "$i";;
+            (*)
+                printf '%%%02x' "'$i";;
+        esac
+    done
+
+    printf '\n'
 }
 
 function chttp::send_request() {

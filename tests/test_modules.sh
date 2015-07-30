@@ -1,5 +1,8 @@
 # url_rewrite
 <<EOF > $CONF
+DEBUG=1
+source $SRC_DIR/modules/debug.sh
+
 MAX_CONN=12
 PORT=$PORT
 IP_REDIRECT="127.0.0.1"
@@ -13,10 +16,10 @@ CACHE=1
 CACHE_DIR="/tmp/.czhttpd-$$"
 LOG_FILE=/dev/null
 
-COMPRESS=0
-CGI_ENABLE=0
-DEBUG=0
-URL_REWRITE=1
+typeset -g COMPRESS=0
+typeset -g CGI_ENABLE=0
+typeset -g URL_REWRITE=1
+
 typeset -gA URL_PATTERNS
 URL_PATTERNS=( "/file.txt" "/.dot.txt" )
 source $SRC_DIR/modules/url_rewrite.sh
@@ -32,15 +35,18 @@ check "URL rewrite file integrity" \
 
 # gzip
 <<EOF > $CONF
+DEBUG=1
+source $SRC_DIR/modules/debug.sh
+
 URL_REWRITE=0
 CGI_ENABLE=0
-DEBUG=0
 COMPRESS=1
-COMPRESS_TYPES="text/html,text/plain"
-COMPRESS_LEVEL=6
-COMPRESS_MIN_SIZE=100
-COMPRESS_CACHE=1
-COMPRESS_CACHE_DIR="/tmp/.czhttpd-$$"
+
+typeset -g COMPRESS_TYPES="text/html,text/plain"
+typeset -g COMPRESS_LEVEL=6
+typeset -g COMPRESS_MIN_SIZE=100
+typeset -g COMPRESS_CACHE=1
+typeset -g COMPRESS_CACHE_DIR="/tmp/.czhttpd-$$"
 source $SRC_DIR/modules/compress.sh
 EOF
 reload_conf
@@ -67,17 +73,20 @@ check "Cache hit check header" \
        --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT
 check "Check compressed file integrity" \
        file_compare $TESTROOT/compress.txt.gz \
-       --header 'Accept-Encoding: gzip' --header 'Accept-leng: sdf' 127.0.0.1:$PORT/compress.txt
+       --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT/compress.txt
 rm $TESTROOT/compress.txt $TESTROOT/compress.txt.gz
 
 # CGI Module
 <<EOF > $CONF
+DEBUG=1
+source $SRC_DIR/modules/debug.sh
+
 URL_REWRITE=0
 COMPRESS=0
-DEBUG=0
 CGI_ENABLE=1
-CGI_EXTS="sh"
-CGI_TIMEOUT=2
+
+typeset -g CGI_EXTS="sh"
+typeset -g CGI_TIMEOUT=2
 source $SRC_DIR/modules/cgi.sh
 EOF
 reload_conf
@@ -116,4 +125,4 @@ check "Test cgi script fail by timeout" \
 check "Test cgi content-type" \
        http_code 500 \
        127.0.0.1:$PORT/test_app_fail2.sh
-rm $TESTROOT/{test_app.sh,test_app_fail1.sh,test_app_fail2.sh}
+rm $TESTROOT/*.sh

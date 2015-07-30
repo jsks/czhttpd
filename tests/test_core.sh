@@ -1,20 +1,3 @@
-<<EOF > $CONF
-MAX_CONN=12
-PORT=$PORT
-IP_REDIRECT="127.0.0.1"
-HTTP_KEEP_ALIVE=1
-HTTP_TIMEOUT=2
-HTTP_RECV_TIMEOUT=1
-INDEX_FILE=index.html
-HIDDEN_FILES=0
-FOLLOW_SYMLINKS=0
-CACHE=0
-CACHE_DIR="/tmp/.czhttpd-$$"
-LOG_FILE=/dev/null
-EOF
-
-print "Hello" > $TESTROOT/index.html
-
 check "Check index file" \
        http_code 200 \
        127.0.0.1:$PORT
@@ -30,6 +13,18 @@ check "File request" \
 check "File integrity" \
        file_compare $TESTROOT/file.txt \
        127.0.0.1:$PORT/file.txt
+check "UTF8 file request" \
+       http_code 200 \
+       127.0.0.1:$PORT/file_pröva.txt
+check "UTF8 file integrity" \
+       file_compare $TESTROOT/file_pröva.txt \
+       127.0.0.1:$PORT/file_pröva.txt
+check "File with spaces request" \
+       http_code 200 \
+       127.0.0.1:$PORT/file\ space.txt
+check "File with spaces integrity" \
+       file_compare $TESTROOT/"file space.txt" \
+       127.0.0.1:$PORT/file\ space.txt
 check "Redirection" \
        http_code 301 \
        127.0.0.1:$PORT/dir
@@ -78,6 +73,9 @@ start_server
 heartbeat
 
 <<EOF > $CONF
+DEBUG=1
+source $SRC_DIR/modules/debug.sh
+
 MAX_CONN=0
 HTTP_KEEP_ALIVE=0
 EOF
@@ -91,6 +89,9 @@ check "Check maxed out connections" \
        127.0.0.1:$PORT
 
 <<EOF > $CONF
+DEBUG=1
+source $SRC_DIR/modules/debug.sh
+
 MAX_CONN=4
 HTTP_KEEP_ALIVE=1
 HTTP_BODY_SIZE=5
