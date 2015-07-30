@@ -45,6 +45,11 @@ typeset -a LOG_FORMAT
 
 typeset CONFIG DOCROOT STDOUT
 
+typeset IP_REDIRECT PORT MAX_CONN \
+        HTTP_KEEP_ALIVE HTTP_TIMEOUT HTTP_RECV_TIMEOUT HTTP_BODY_SIZE \
+        INDEX_FILE HIDDEN_FILES FOLLOW_SYMLINKS \
+        LOG_FILE CACHE CACHE_FILE
+
 typeset -A req_headers
 typeset -a conn_list
 
@@ -680,6 +685,7 @@ function cleanup() {
 ###
 # If child exits, connection has been closed so remove from our master array
 function TRAPCHLD() {
+    local i
     for i in $conn_list; kill -0 $i 2>/dev/null || conn_list=(${conn_list#$i})
 }
 
