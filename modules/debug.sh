@@ -30,7 +30,7 @@ typeset -g dbg_sfile
 
 # Ignore the following compound statements in TRAPDEBUG
 typeset -ga dbg_ignore_list
-dbg_ignore_list=(if else elif then while for select repeat until do case function \(\) \( \{)
+dbg_ignore_list=(if else elif then while for select repeat until do case function coproc \(\) \( \{)
 
 dbg_sfile="/tmp/czhttpd-stats-$$.$RANDOM"
 

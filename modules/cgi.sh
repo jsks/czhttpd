@@ -16,6 +16,7 @@ readonly GATEWAY_INTERFACE="CGI/1.1"
 
 function timeout() {
     setopt local_traps
+    unsetopt err_return
     local pid1 pid2 pid_status
 
     TRAPCHLD() {
@@ -83,8 +84,10 @@ function exec_cgi() {
         return
     fi
 
-    while read -t $CGI_TIMEOUT -r -p line; do
+    while :; do
+        read -t $CGI_TIMEOUT -r -p line
         [[ -z $line || $line == $'\r' ]] && break
+
         [[ $line =~ "Status:*" ]] && cgi_status_code=${line#Status: }
         cgi_head+=${line%$'\r'}
     done
@@ -98,6 +101,6 @@ function exec_cgi() {
     fi
 
     log_f ${cgi_status_code:-"200"}
-    return_header ${cgi_status_code:-"200 Ok"} "Transfer-Encoding: chunked" $cgi_head[@]
+    return_header "${cgi_status_code:-200 Ok}" "Transfer-Encoding: chunked" ${cgi_head[@]}
     send_chunk <&p
 }
