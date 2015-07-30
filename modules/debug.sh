@@ -112,7 +112,7 @@ function debug_handler() {
 
     dbg_cmd=${ZSH_DEBUG_CMD[(w)1]}
     if [[ ${(w)#ZSH_DEBUG_CMD} > 1 ]]; then
-        dbg_args=${ZSH_DEBUG_CMD[(w)2,-1]%%((\&\&)|(\|\|))*}
+        dbg_args=${ZSH_DEBUG_CMD[(w)2,-1]}
     fi
 
     for dbg_i in $DEBUG_TRACE_FUNCS; do
