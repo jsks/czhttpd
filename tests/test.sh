@@ -9,15 +9,22 @@ zmodload zsh/system
 
 setopt err_return
 
-integer debugfd COUNTER=1 RET
+typeset -gA STATS
+STATS[count]=0
+STATS[pass]=0
+STATS[fail]=0
+
+integer debugfd
 typeset -g PID
 
 function assert() {
     if [[ $3 =~ $2 ]]; then
+        (( STATS[pass]++ )) || :
         if (( VERBOSE )); then
             print "$fg[green]Passed$fg[white]: $i ($fg[blue]$opts[$i]$fg[white])"
         fi
     else
+        (( STATS[fail]++ )) || :
         RET=1
         print "$fg[red]Failed$fg[white]: $i ($fg[blue]$opts[$i]$fg[white])"
     fi
@@ -89,13 +96,12 @@ function check() {
     done
 
     (( VERBOSE )) && info
-    [[ -n ${STEPWISE[(r)$COUNTER]} ]] && { read -k '?Press any key to continue...' }
-
-    (( COUNTER++ ))
+    [[ -n ${STEPWISE[(r)$STATS[count]]} ]] && { read -k '?Press any key to continue...' }
 }
 
 function describe() {
-    print "$fg[cyan]$COUNTER$fg[white]. $*"
+    (( STATS[count]++ )) || :
+    print "$fg[cyan]$STATS[count]$fg[white]. $*"
 }
 
 function info() {
@@ -111,6 +117,15 @@ function info() {
     printf "\t$fg[magenta]%.3fs Total Time$fg[white]\n" \
         $(( $(chttp::calc_time connect) + $(chttp::calc_time send) \
         + $(chttp::calc_time download) ))
+}
+
+function print_stats() {
+<<EOF
+$fg[blue]Total Tests$fg[white]: $STATS[count], \
+$fg[blue]Assertions$fg[white]: $(( STATS[pass] + STATS[fail] )) -> \
+$fg[green]$STATS[pass] Passed$fg[white], \
+$fg[red]$STATS[fail] Failed$fg[white]
+EOF
 }
 
 function start_server() {
@@ -225,5 +240,6 @@ for i in ${1:-$SRC_DIR/tests/test_*.sh}; do
     source $i
 done
 
+print_stats
 # Allow all tests to finish, but return w/ err if necessary
-return ${RET:-0}
+return ${STATS[fail]:-0}
