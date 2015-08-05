@@ -12,7 +12,7 @@ HTTP_KEEP_ALIVE=1
 HTTP_TIMEOUT=2
 HTTP_RECV_TIMEOUT=1
 HTTP_BODY_SIZE=16384
-INDEX_FILE=index.html
+INDEX_FILE=0
 HIDDEN_FILES=1
 FOLLOW_SYMLINKS=0
 CACHE=1
@@ -29,12 +29,11 @@ source $SRC_DIR/modules/url_rewrite.sh
 EOF
 reload_conf
 
-check "URL rewrite status code" \
-       http_code 200 \
-       127.0.0.1:$PORT/file.txt
-check "URL rewrite file integrity" \
-       file_compare $TESTROOT/.dot.txt \
-       127.0.0.1:$PORT/file.txt
+describe "URL rewrite"
+check 127.0.0.1:$PORT/file.txt \
+      --http_code 200 \
+      --file_compare $TESTROOT/.dot.txt \
+      --header_compare 'Content-type: text/plain'
 
 # gzip
 <<EOF > $CONF
@@ -61,24 +60,21 @@ for i in {1..1000}; str+="lorem ipsum "
 print $str > $TESTROOT/compress.txt
 gzip -k -6 $TESTROOT/compress.txt
 
-check "Compress file request" \
-       http_code 200 \
-       --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT/compress.txt
-check "Compress header check" \
-       header_compare 'Content-Encoding: gzip' \
-       --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT/compress.txt
-check "Compress dir request" \
-       header_compare 'Content-Encoding: gzip' \
-       --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT
-check "Cache hit for dir request" \
-       http_code 200 \
-       --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT
-check "Cache hit check header" \
-       header_compare 'Content-Length: [0-9]' \
-       --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT
-check "Check compressed file integrity" \
-       file_compare $TESTROOT/compress.txt.gz \
-       --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT/compress.txt
+describe "Compress file request"
+check --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT/compress.txt \
+      --http_code 200 \
+      --file_compare $TESTROOT/compress.txt.gz \
+      --header_compare 'Content-Encoding: gzip'
+
+describe "Compress dir request"
+check --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT \
+      --http_code 200 \
+      --header_compare 'Content-Encoding: gzip'
+
+describe "Cached dir request"
+check --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT \
+      --header_compare 'Content-Length: [0-9]'
+
 rm $TESTROOT/compress.txt $TESTROOT/compress.txt.gz
 
 # CGI Module
@@ -120,16 +116,17 @@ print "foo"
 EOF
 chmod +x $TESTROOT/test_app_fail2.sh
 
-check "Test cgi script" \
-       http_code 200 \
-       127.0.0.1:$PORT/test_app.sh
-check "Test cgi output size" \
-       size_download 13 \
-       127.0.0.1:$PORT/test_app.sh
-check "Test cgi script fail by timeout" \
-       http_code 500 \
-       127.0.0.1:$PORT/test_app_fail1.sh
-check "Test cgi content-type" \
-       http_code 500 \
-       127.0.0.1:$PORT/test_app_fail2.sh
+describe "Test cgi script"
+check 127.0.0.1:$PORT/test_app.sh \
+      --http_code 200 \
+      --size_download 13
+
+describe "Test cgi script fail by timeout"
+check 127.0.0.1:$PORT/test_app_fail1.sh \
+      --http_code 500
+
+describe "Test cgi script fail by content-type"
+check 127.0.0.1:$PORT/test_app_fail2.sh \
+      --http_code 500
+
 rm $TESTROOT/*.sh

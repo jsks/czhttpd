@@ -13,11 +13,13 @@ integer debugfd COUNTER=1 RET
 typeset -g PID
 
 function assert() {
-    if [[ $2 =~ $1 ]]; then
-        print "$fg[green]Passed$fg[white]"
+    if [[ $3 =~ $2 ]]; then
+        if (( VERBOSE )); then
+            print "$fg[green]Passed$fg[white]: $i ($fg[blue]$opts[$i]$fg[white])"
+        fi
     else
         RET=1
-        print "$fg[red]Failed$fg[white]"
+        print "$fg[red]Failed$fg[white]: $i ($fg[blue]$opts[$i]$fg[white])"
     fi
 }
 
@@ -59,38 +61,32 @@ function get_http() {
 ###
 # Makes a request to our server and tests the output. Comparisons are a simple
 # pass or fail.
-#   Available to test:
-#       - file_compare
-#       - header_compare
-#       - http_code
-#       - size_download
-#
-#   @Args -> $1 Description string for the test
-#            $2 Type of comparison
-#            $3 Expected value (can be a pattern)
-#            $4 Arguments to pass to our http_client (ex url)
-#
-# Welcome to shell scripting!
+#   @Options -> --file_compare
+#               --header_compare
+#               --http_code
+#               --size_download
+#   Everything else gets sent as args to `get_http`
 function check() {
-    local output
+    local -A opts
+    local output i
+    zparseopts -E -D -A opts -file_compare: -header_compare: -size_download: -http_code:
 
     output="$TESTTMP/${@[-1]:t}.output"
-    get_http --output $output $@[4,-1]
+    get_http --output $output $*
 
-    print -n "$fg[cyan]$COUNTER. $fg[blue]($3)$fg[white] $1..."
-    case $2 in
-        ("file_compare")
-            assert $(md5 -q ${3:A}) $(md5 -q $output);;
-        ("header_compare")
-            assert ${(Lz)3[(ws.:.)2]} ${CHTTP_RESP_HEADERS[${(L)3[(ws.:.)1]}]};;
-        ("size_download")
-            assert $3 $CHTTP_DOWNLOAD_SIZE;;
-        ("http_code")
-            assert $3 ${CHTTP_RESP_HEADERS[status_line][(w)2]};;
-        (*)
-            print "Unknown comparison type: $2"
-            return 1;;
-    esac
+    for i in ${(k)opts}; do
+        case $i in
+            ("--file_compare")
+                assert $i $(md5 -q ${opts[$i]:A}) $(md5 -q $output);;
+            ("--header_compare")
+                assert $i ${(Lz)opts[$i][(ws.:.)2]} \
+                    ${CHTTP_RESP_HEADERS[${(L)opts[$i][(ws.:.)1]}]};;
+            ("--size_download")
+                assert $i $opts[$i] $CHTTP_DOWNLOAD_SIZE;;
+            ("--http_code")
+                assert $i $opts[$i] ${CHTTP_RESP_HEADERS[status_line][(w)2]};;
+        esac
+    done
 
     (( VERBOSE )) && info
     [[ -n ${STEPWISE[(r)$COUNTER]} ]] && { read -k '?Press any key to continue...' }
@@ -98,7 +94,12 @@ function check() {
     (( COUNTER++ ))
 }
 
+function describe() {
+    print "$fg[cyan]$COUNTER$fg[white]. $*"
+}
+
 function info() {
+    print
     print "URL: $CHTTP_URL"
     chttp::print_headers
     print "$fg[yellow]Download size:$fg[white] $CHTTP_DOWNLOAD_SIZE"

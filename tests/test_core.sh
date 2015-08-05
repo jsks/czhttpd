@@ -23,80 +23,66 @@ EOF
 reload_conf
 
 # Let's check normal file/dir serving first with a default conf
-check "Check index file" \
-       http_code 200 \
-       127.0.0.1:$PORT
-check "Check index file integrity" \
-       file_compare $TESTROOT/index.html \
-       127.0.0.1:$PORT
-check "Directory request" \
-       http_code 200 \
-       127.0.0.1:$PORT/dir/
-check "File request" \
-       http_code 200 \
-       127.0.0.1:$PORT/file.txt
-check "File integrity" \
-       file_compare $TESTROOT/file.txt \
-       127.0.0.1:$PORT/file.txt
-check "UTF8 file request" \
-       http_code 200 \
-       127.0.0.1:$PORT/file_pröva.txt
-check "UTF8 file integrity" \
-       file_compare $TESTROOT/file_pröva.txt \
-       127.0.0.1:$PORT/file_pröva.txt
-check "File with spaces request" \
-       http_code 200 \
-       127.0.0.1:$PORT/file\ space.txt
-check "File with spaces integrity" \
-       file_compare $TESTROOT/"file space.txt" \
-       127.0.0.1:$PORT/file\ space.txt
-check "Directory request" \
-       http_code 200 \
-       127.0.0.1:$PORT/dir/
+describe "Check index file"
+check --header 'keep-alive' 127.0.0.1:$PORT \
+      --http_code 200 \
+      --file_compare $TESTROOT/index.html \
+      --header_compare 'Content-type: text/html'
+
+for i in {file,file_pröva,file\ space}.txt; do
+    describe "Normal request for $i"
+    check 127.0.0.1:$PORT/$i \
+          --http_code 200 \
+          --file_compare $TESTROOT/$i \
+          --header_compare 'Content-type: text/plain'
+done
+
+describe "Check directory request"
+check 127.0.0.1:$PORT/dir/ \
+      --http_code 200 \
+      --header_compare 'Transfer-Encoding: chunked'
 
 # Let's go up the chain of http error codes
-check "Redirection" \
-       http_code 301 \
-       127.0.0.1:$PORT/dir
-check "Incomplete request line" \
-       http_code 400 \
-       --method " " 127.0.0.1:$PORT
-check "Dot file disabled request" \
-       http_code 403 \
-       127.0.0.1:$PORT/.dot.txt
-check "Symbolic link disabled request" \
-       http_code 403 \
-       127.0.0.1:$PORT/link
-check "Nonexistent file/dir" \
-       http_code 404 \
-       127.0.0.1:$PORT/foo
-check "Test unknown method" \
-       http_code 501 \
-       --method "PUT" 127.0.0.1:$PORT
-check "HTTP/1.0 request" \
-       http_code 505 \
-       --http 1.0 127.0.0.1:$PORT
+describe "Redirection"
+check 127.0.0.1:$PORT/dir \
+      --http_code 301
+
+describe "Incomplete request line"
+check --method " " 127.0.0.1:$PORT \
+      --http_code 400
+
+describe "Dot file disabled request"
+check 127.0.0.1:$PORT/.dot.txt \
+      --http_code 403
+
+describe "Symbolic link disabled request"
+check 127.0.0.1:$PORT/link \
+      --http_code 403
+
+describe "Nonexistent file/dir"
+check 127.0.0.1:$PORT/foo \
+      --http_code 404
+
+describe "Test unknown method"
+check --method "PUT" 127.0.0.1:$PORT \
+      --http_code 501
+
+describe "HTTP/1.0 request"
+check --http 1.0 127.0.0.1:$PORT \
+      --http_code 505
 
 # Finally, let's check that our headers are being set properly
-check "Client Connection: close" \
-       header_compare 'Connection: close' \
-       --header 'Connection: close' 127.0.0.1:$PORT
-check "Client Connection: keep-alive" \
-       header_compare 'Connection: keep-alive' \
-       --header 'Connection: keep-alive' \
-       127.0.0.1:$PORT
-check "Server header" \
-       header_compare 'Server: czhttpd' \
-       --header 'Host: SuperAwesomeServer' 127.0.0.1:$PORT
-check "File txt mimetype" \
-       header_compare 'Content-type: text/plain' \
-       127.0.0.1:$PORT/file.txt
-check "File html mimetype" \
-       header_compare 'Content-type: text/html' \
-       127.0.0.1:$PORT/index.html
-check "Dir html mimetype" \
-       header_compare 'Content-type: text/html' \
-       127.0.0.1:$PORT/dir/
+describe "Client Connection: close"
+check --header 'Connection: close' 127.0.0.1:$PORT \
+      --header_compare 'Connection: close'
+
+describe "Client Connection: keep-alive"
+check --header 'Connection: keep-alive' 127.0.0.1:$PORT \
+      --header_compare 'Connection: keep-alive'
+
+describe "Server header"
+check --header 'Host: SuperAwesomeServ' 127.0.0.1:$PORT \
+      --header_compare 'Server: czhttpd'
 
 rm $TESTROOT/index.html
 
@@ -106,12 +92,11 @@ TESTROOT=$TESTROOT/file.txt
 start_server
 heartbeat
 
-check "Check serving single file" \
-       http_code 200 \
-       127.0.0.1:$PORT
-check "Check integrity for serving single file" \
-       file_compare $TESTROOT \
-       127.0.0.1:$PORT
+describe "Check serving single file"
+check 127.0.0.1:$PORT \
+      --http_code 200 \
+      --file_compare $TESTROOT \
+      --header_compare 'Content-type: text/plain'
 
 stop_server
 TESTROOT=/tmp/czhttpd-test
@@ -129,12 +114,13 @@ HTTP_KEEP_ALIVE=0
 EOF
 reload_conf
 
-check "Keep alive disabled" \
-       header_compare 'Connection: close' \
-       --header 'Connection: keep-alive' 127.0.0.1:$PORT
-check "Check maxed out connections" \
-       http_code 503 \
-       127.0.0.1:$PORT
+describe "Keep alive disabled"
+check --header 'Connection: keep-alive' 127.0.0.1:$PORT \
+      --header_compare 'Connection: close'
+
+describe "Check maxed out connections"
+check 127.0.0.1:$PORT \
+      --http_code 503
 
 # Let's enable some non-default config options
 <<EOF > $CONF
@@ -154,42 +140,40 @@ reload_conf
 
 # Let's check that czhttpd is caching html files. The only way really is to see
 # if the file is being sent with fixed length rather than chunked.
-check "Request to build cache" \
-       http_code 200 \
-       127.0.0.1:$PORT
-check "Check http code cache hit" \
-       http_code 200 \
-       127.0.0.1:$PORT
-check "Check cache hit header" \
-       header_compare 'Content-length: [0-9]' \
-       127.0.0.1:$PORT
+describe "Cache request"
+check 127.0.0.1:$PORT \
+      --http_code 200 \
+      --header_compare 'Content-length: [0-9]'
 
-check "Enabled hidden files request" \
-       http_code 200 \
-       127.0.0.1:$PORT/.dot.txt
-check "Enabled hidden files integrity" \
-       file_compare $TESTROOT/.dot.txt \
-       127.0.0.1:$PORT/.dot.txt
-check "Request with symbolic link" \
-       http_code 200 \
-       127.0.0.1:$PORT/link
-check "Symbolic link integrity" \
-       file_compare $TESTROOT/file.txt \
-       127.0.0.1:$PORT/link
+describe "Enabled hidden files request"
+check 127.0.0.1:$PORT/.dot.txt \
+      --http_code 200 \
+      --file_compare $TESTROOT/.dot.txt \
+      --header_compare 'Content-type: text/plain'
+
+describe "Enabled symbolic link request"
+check 127.0.0.1:$PORT/link \
+      --http_code 200 \
+      --file_compare $TESTROOT/file.txt \
+      --header_compare 'Content-type: text/plain'
 
 # Check parsing request message body
-check "Fixed request body too large" \
-       http_code 413 \
-       --data 'Hello World!' 127.0.0.1:$PORT
-check "Fixed request body smaller than content-length" \
-       http_code 400 \
-       --data 'HH' --header 'Content-Length: 3' 127.0.0.1:$PORT
-check "Fixed request body just right" \
-       http_code 200 \
-       --data 'HH' 127.0.0.1:$PORT
-check "Chunked request body too large" \
-       http_code 413 \
-       --chunked --data 'Hello World!' 127.0.0.1:$PORT
-check "Chunked request body just right" \
-       http_code 200 \
-       --chunked --data 'HH' 127.0.0.1:$PORT
+describe "Fixed request body too large"
+check --data 'Hello World!' 127.0.0.1:$PORT \
+      --http_code 413
+
+describe "Fixed request body smaller than content-length"
+check --data 'HH' --header 'Content-length: 3' 127.0.0.1:$PORT \
+      --http_code 400
+
+describe "Fixed request body just right"
+check --data 'HH' 127.0.0.1:$PORT \
+      --http_code 200
+
+describe "Chunked request body too large"
+check --chunked --data 'Hello World!' 127.0.0.1:$PORT \
+      --http_code 413
+
+describe "Chunked request body just right"
+check --chunked --data 'HH' 127.0.0.1:$PORT \
+      --http_code 200
