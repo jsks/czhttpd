@@ -34,8 +34,10 @@ Options:
     -l | --log          Redirect czhttpd output to given file
     -p | --port         Port to pass to czhttpd (Default: 8080)
     -s | --stepwise     Pause after specified test. Argument can also be a comma
-                        deliminated list of tests or ranges of tests
-                        (ex: -s 2,4,6-9)
+                          deliminated list of tests or ranges of tests
+                          (ex: -s 2,4,6-9)
+    -t | --trace        Enable function tracing for the following comma
+                          deliminated list of czhttpd functions
     -v | --verbose      Enable verbose output
 EOF
 
@@ -75,7 +77,7 @@ function check() {
     output="$TESTTMP/${@[-1]:t}.output"
     get_http --output $output $@[4,-1]
 
-    print -n "$fg[cyan]$COUNTER. $fg[blue]($3)$fg[white] $1 $ret[url_effective]..."
+    print -n "$fg[cyan]$COUNTER. $fg[blue]($3)$fg[white] $1..."
     case $2 in
         ("file_compare")
             assert $(md5 -q ${3:A}) $(md5 -q $output);;
@@ -97,6 +99,7 @@ function check() {
 }
 
 function info() {
+    print "URL: $CHTTP_URL"
     chttp::print_headers
     print "$fg[yellow]Download size:$fg[white] $CHTTP_DOWNLOAD_SIZE"
     printf "$fg[yellow]Times:$fg[white]  %.3fs connect\n\t%.3fs send\n\
@@ -147,7 +150,7 @@ function cleanup() {
     rm -rf $TESTTMP $TESTROOT
 }
 
-zparseopts -D -A opts -verbose v -stepwise: s: -log: l: -port: p: -help h || error "Failed to parse args"
+zparseopts -D -A opts -verbose v -stepwise: s: -trace: t: -log: l: -port: p: -help h || error "Failed to parse args"
 
 for i in ${(k)opts}; do
     case $i in
@@ -163,6 +166,9 @@ for i in ${(k)opts}; do
                     STEPWISE+=($i)
                 fi
             done;;
+        ("--trace"|"-t")
+            typeset -a TRACE_FUNCS
+            for i in ${(s.,.)opts[$i]}; TRACE_FUNCS+=(${(z)i});;
         ("--verbose"|"-v")
             VERBOSE=1;;
         ("--log"|"-l")
@@ -200,23 +206,7 @@ TESTROOT=/tmp/czhttpd-test
 mkdir $TESTROOT
 
 CONF="$TESTROOT/cz.conf"
-<<EOF > $CONF
-DEBUG=1
-source $SRC_DIR/modules/debug.sh
-
-MAX_CONN=1
-PORT=$PORT
-IP_REDIRECT="127.0.0.1"
-HTTP_KEEP_ALIVE=1
-HTTP_TIMEOUT=2
-HTTP_RECV_TIMEOUT=1
-INDEX_FILE=index.html
-HIDDEN_FILES=0
-FOLLOW_SYMLINKS=0
-CACHE=0
-CACHE_DIR="/tmp/.czhttpd-$$"
-LOG_FILE=/dev/null
-EOF
+: > $CONF
 
 mkdir $TESTROOT/dir
 print hejsan > $TESTROOT/index.html

@@ -1,6 +1,8 @@
 # url_rewrite
 <<EOF > $CONF
 DEBUG=1
+typeset -ga DEBUG_TRACE_FUNCS
+DEBUG_TRACE_FUNCS=($TRACE_FUNCS)
 source $SRC_DIR/modules/debug.sh
 
 MAX_CONN=12
@@ -9,6 +11,7 @@ IP_REDIRECT="127.0.0.1"
 HTTP_KEEP_ALIVE=1
 HTTP_TIMEOUT=2
 HTTP_RECV_TIMEOUT=1
+HTTP_BODY_SIZE=16384
 INDEX_FILE=index.html
 HIDDEN_FILES=1
 FOLLOW_SYMLINKS=0
@@ -36,6 +39,8 @@ check "URL rewrite file integrity" \
 # gzip
 <<EOF > $CONF
 DEBUG=1
+typeset -ga DEBUG_TRACE_FUNCS
+DEBUG_TRACE_FUNCS=($TRACE_FUNCS)
 source $SRC_DIR/modules/debug.sh
 
 URL_REWRITE=0
@@ -79,6 +84,8 @@ rm $TESTROOT/compress.txt $TESTROOT/compress.txt.gz
 # CGI Module
 <<EOF > $CONF
 DEBUG=1
+typeset -ga DEBUG_TRACE_FUNCS
+DEBUG_TRACE_FUNCS=($TRACE_FUNCS)
 source $SRC_DIR/modules/debug.sh
 
 URL_REWRITE=0
