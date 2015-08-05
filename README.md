@@ -1,8 +1,6 @@
 # czhttpd
 Simple http server written in 99.9% pure zsh
 
----
-
 ```
 czhttpd [OPTIONS] <file or dir>
 - Options
