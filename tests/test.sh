@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/zsh
 # Testing script for czhttpd. Individual tests split into test_*.sh.
 
 autoload colors
@@ -27,6 +27,14 @@ function assert() {
         (( STATS[fail]++ )) || :
         RET=1
         print "$fg[red]Failed$fg[white]: $i ($fg[blue]$opts[$i]$fg[white])"
+    fi
+}
+
+function md5hash () {
+    if [[ $OSTYPE == linux* ]]; then
+        md5sum $1 | cut -d ' ' -f1
+    else
+        md5 -q $1
     fi
 }
 
@@ -84,7 +92,7 @@ function check() {
     for i in ${(k)opts}; do
         case $i in
             ("--file_compare")
-                assert $i $(md5 -q ${opts[$i]:A}) $(md5 -q $output);;
+                assert $i $(md5hash ${opts[$i]:A}) $(md5hash $output);;
             ("--header_compare")
                 assert $i ${(Lz)opts[$i][(ws.:.)2]} \
                     ${CHTTP_RESP_HEADERS[${(L)opts[$i][(ws.:.)1]}]};;
