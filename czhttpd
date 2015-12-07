@@ -5,6 +5,12 @@
 # Site: https://github.com/jsks/czhttpd
 ###
 
+# Several accumulated bug fixes in 5.2 that we need
+if [[ ${ZSH_VERSION//./} < 52 ]]; then
+    print 'Incompatible zsh version'
+    exit 113
+fi
+
 # Clear env
 for z in ${(SM)$(export)#*=}; do
     case ${z%=} in
@@ -24,7 +30,6 @@ zmodload zsh/parameter
 zmodload zsh/stat
 zmodload zsh/system
 zmodload zsh/net/tcp
-zmodload zsh/zselect
 
 ### zsh options
 # unset:
@@ -774,9 +779,7 @@ cz_init || error "Failed to initialize czhttpd"
 http_listen
 
 while :; do
-    # Use select to block since interrupting `ztcp -a` crashes our script. We
-    # really should be using '-t' but ztcp polling is broken in OSX
-    { zselect -r $listenfd && ztcp -a $listenfd } || continue
+    ztcp -a $listenfd
     fd=$REPLY
 
     if (( ${#conn_list} >= MAX_CONN )); then
@@ -786,9 +789,6 @@ while :; do
     fi
 
     ( trap "ztcp -c; rmlock 2>/dev/null; exit" KILL TERM INT EXIT; trap '' PIPE; trap - CHLD HUP
-
-    # This won't really do much for us until fixed, see:
-    # http://www.zsh.org/mla/workers/2015/msg01675.html
     setopt err_return
 
     while :; do
