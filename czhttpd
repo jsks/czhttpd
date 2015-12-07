@@ -6,7 +6,7 @@
 ###
 
 # Several accumulated bug fixes in 5.2 that we need
-if [[ ${ZSH_VERSION//./} < 52 ]]; then
+if [[ $ZSH_VERSION < 5.2 ]]; then
     print 'Incompatible zsh version'
     exit 113
 fi
