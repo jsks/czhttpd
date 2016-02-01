@@ -15,7 +15,7 @@ if (( $DEBUG != 1 )); then
     return
 fi
 
-setopt warn_create_global
+#setopt warn_create_global
 
 ###
 # DBG_IN -> array[child pid] = bytes read
