@@ -2,21 +2,27 @@
 Simple http server written in 99.9% pure zsh
 
 ```
-czhttpd [OPTIONS] <file or dir>
-- Options
-    -c :    Configuration file (default: ~/.config/czhttpd/conf/main.conf)
-    -p :    Port to bind to (default: 8080)
-    -h :    Print useless help message
-    -v :    Redirect logging to stdout
+$ ./czhttpd -h
+Usage: czhttpd [OPTIONS] <file or dir>
 
-If no file or directory is given, czhttpd defaults to serving the current directory
+czhttpd - cloud's zsh http server
+
+Options
+    -c :    Config file location (default: ~/.config/czhttpd/main.conf)
+    -h :    Print this help message
+    -p :    Port to bind to (default: 8080)
+    -v :    Redirect log messages to stdout
+
+If no file or directory is given, czhttpd defaults to serving
+the current directory.
 ```
 
 #### Dependencies
-None. However, if available, `file` is used for fallback mime-type support.
+`>=zsh-5.6`. If available, `file` is also used for fallback mime-type support.
+
 
 #### Features
-- Basic support for HTTP/1.1 (methods limited to HEAD, GET, POST)
+- Basic support for `HTTP/1.1` (methods limited to `HEAD`, `GET`, `POST`)
 - Dynamic directory listing with primitive caching
 - UTF-8 support
 - Multiple concurrent connections
@@ -28,9 +34,9 @@ None. However, if available, `file` is used for fallback mime-type support.
     - Basic url rewrite
 
 #### Configuration
-The provided sample `main.conf` lists the variables that can be changed. Any additional files or modules can be sourced using the standard shell command, `source`. Similarly, the configuration variables for each module can be found in the respective config file.
+The provided sample `main.conf` lists the variables that can be changed. Any additional files or modules can be sourced using the standard shell command, `source`. Similarly, the configuration variables for each module can be found in the respective config files.
 
-By default, czhttpd searches for `main.conf` in `~/.config/czhttpd/conf/`. An alternative config file can be specified with the commandline option `-c`.
+By default, czhttpd searches for `main.conf` in `~/.config/czhttpd/conf/`. An alternative configuration file can be specified with the commandline option `-c`.
 
 ##### Live Reload
 czhttpd will automatically reload its configuration file and gracefully handle any changes and current open connections when the `HUP` signal is sent to the parent czhttpd pid. Ex:
