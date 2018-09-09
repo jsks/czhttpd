@@ -8,7 +8,7 @@ Usage: czhttpd [OPTIONS] <file or dir>
 czhttpd - cloud's zsh http server
 
 Options
-    -c :    Config file location (default: ~/.config/czhttpd/main.conf)
+    -c :    Optional configuration file (default: ~/.config/czhttpd/main.conf)
     -h :    Print this help message
     -p :    Port to bind to (default: 8080)
     -v :    Redirect log messages to stdout
@@ -48,7 +48,7 @@ kill -HUP <czhttpd pid>
 #### TODO
 - [ ] How we handle modules (including the whole srv->handler->send chain) really needs to be rethought
 - [X] Finish up `debug.sh`
-- [ ] IP matching should be reintroduced as a new module 
+- [ ] IP matching should be reintroduced as a new module
 - [ ] Error messages from http_client
 
 ---
