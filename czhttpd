@@ -1,12 +1,13 @@
-#!/usr/bin/zsh
-### czhttpd
-# zsh web server
+#!/usr/bin/env zsh
+#
+# czhttpd - zsh web server
+#
 # Author: jsks
 # Site: https://github.com/jsks/czhttpd
 ###
 
-# Several accumulated bug fixes in 5.2 that we need
-if [[ $ZSH_VERSION < 5.2 ]]; then
+# Several accumulated bug fixes since 5.6 that we need
+if [[ $ZSH_VERSION < 5.6 ]]; then
     print 'Incompatible zsh version'
     exit 113
 fi
@@ -44,7 +45,7 @@ zmodload zsh/net/tcp
 unsetopt multibyte glob_dots err_return
 setopt posix_jobs bare_glob_qual local_options extended_glob
 
-# Declare variable types
+# Declare global variable types
 typeset -A MTYPES HTTP_CODES
 typeset -a LOG_FORMAT
 
@@ -119,9 +120,8 @@ function error() {
     exit 113
 }
 
-###
-# Check that we have a valid fd and reset if necessary (ex: logging within
-# process substitution)
+# Check that we have a valid fd and reset if necessary (ex: logging
+# within process substitution)
 function log_f() {
     local cur_time
     get_time
@@ -379,7 +379,7 @@ function http_listen() {
 # values, but that would also add an insane amount of complexity (esp. wrt
 # pipelining).
 #
-# Ex: One of our shortcomings now is that we don't know why `read` (may) fail,
+# Ex: One of our shortcomings now is that we don't know why `read` may fail,
 # so we can't return a 408 on timeout.
 function parse_request() {
     unset req_headers; typeset -gA req_headers
@@ -622,7 +622,7 @@ function __send() {
 }
 
 ###
-# How to fulfill valid request(create directory listing or send a file etc etc)
+# How to fulfill valid request (create directory listing or send a file etc etc)
 function __handler() {
     if [[ -f $1 ]]; then
         local mtype
@@ -716,7 +716,7 @@ function cz_init() {
     log_f "> Initializing czhttpd"
 
     # Default callback functions, allows modules to override how we handle
-    # requests Can't be simple aliases since shell won't find the cmd
+    # requests. Can't be simple aliases since shell won't find the cmd
     ! typeset -f send >/dev/null && function send() { __send $* }
     ! typeset -f handler >/dev/null && function handler() { __handler $* }
     ! typeset -f srv >/dev/null && function srv() { __srv $* }
