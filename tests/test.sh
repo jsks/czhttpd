@@ -105,6 +105,8 @@ function check() {
 
     (( VERBOSE )) && info
     [[ -n ${STEPWISE[(r)$STATS[count]]} ]] && { read -k '?Press any key to continue...' }
+
+    return 0
 }
 
 function describe() {
