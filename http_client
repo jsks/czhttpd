@@ -156,9 +156,7 @@ function chttp::send_request() {
 
     if [[ -n $__REQ_DATA ]]; then
         if (( __CHUNKED )); then
-            if [[ -z $__REQ_HEADERS[Transfer-encoding] ]]; then
-                __REQ_HEADERS[Transfer-encoding]="chunked"
-            fi
+            __REQ_HEADERS[transfer-encoding]="chunked"
 
             chttp::return_headers
             chttp::send_chunk <<< $__REQ_DATA >&$__fd
@@ -214,11 +212,11 @@ function chttp::read_response() {
 
     while read -t $__RECV_TIMEOUT -r -u $__fd line; do
        [[ -z $line || $line == $'\r' ]] && break
-       
+
         for key value in ${(s.: .)line%$'\r'}; do
             CHTTP_RESP_HEADERS[${(L)key}]="$value"
         done
-    done 
+    done
 
     chttp::print_headers >&$__verbosefd
 
@@ -266,7 +264,7 @@ function chttp::read_body() {
                 sysread -o 1 -t $__RECV_TIMEOUT -s $offset -c count -i $__fd >/dev/null
                 (( ! (offset-=count) )) && break
             done
-            
+
             unset line
         done
     fi
