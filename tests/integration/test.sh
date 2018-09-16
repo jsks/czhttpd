@@ -26,6 +26,9 @@ readonly -g TEST_DIR=${0:A:h}
 
 source $TEST_DIR/../utils.sh
 
+mkdir -p $TESTTMP $TESTROOT
+: >> $CONF
+
 function assert() {
     if [[ $3 =~ $2 ]]; then
         (( STATS[pass]++ )) || :

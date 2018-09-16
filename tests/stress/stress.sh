@@ -20,6 +20,9 @@ readonly -g HTML_DIR=$STRESS_DIR/html
 
 source $STRESS_DIR/../utils.sh
 
+mkdir -p $TESTTMP $TESTROOT
+: >> $CONF
+
 function help() {
 <<EOF
 czhttpd stress test script
