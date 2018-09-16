@@ -351,9 +351,10 @@ function mod_time() {
 }
 
 ###
-# No way around subshell
+# Decode url
+#   @Sets var -> decoded_url
 function urldecode() {
-    printf '%b\n' "${1:gs/%/\\x}"
+    printf -v decoded_url '%b' "${1:gs/%/\\x}"
 }
 
 ### HTTP functions
@@ -650,7 +651,10 @@ function __handler() {
 ###
 # Can we fulfill the request?
 function __srv() {
-    local pathname="${DOCROOT}$(urldecode ${1:-$req_headers[url]})"
+    local pathname decoded_url
+
+    urldecode ${1:-$req_headers[url]}
+    pathname="${DOCROOT}$decoded_url"
 
     [[ $HIDDEN_FILES != "1" && ${pathname:t} == .* ]] && { error_header 403; return }
     [[ $FOLLOW_SYMLINKS != "1" && -h ${pathname%/} ]] && { error_header 403; return }
