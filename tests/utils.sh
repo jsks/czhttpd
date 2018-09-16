@@ -11,9 +11,6 @@ typeset -g SRC_DIR TESTTMP TESTROOT CONF PORT
 : ${CONF:=$TESTROOT/cz.conf}
 : ${PORT:=8080}
 
-mkdir -p $TESTTMP $TESTROOT
-: >> $CONF
-
 typeset -g PID
 integer -g debugfd
 
@@ -25,7 +22,7 @@ function error() {
 function start_server() {
     setopt noerr_return
 
-    zsh $SRC_DIR/czhttpd -v -p $PORT -c $CONF $TESTROOT >&$debugfd &
+    zsh -f $SRC_DIR/czhttpd -v -p $PORT -c $CONF $TESTROOT >&$debugfd &
     typeset +r -g PID=$!
     readonly -g PID
 }
@@ -60,7 +57,9 @@ function reload_conf() {
 function cleanup() {
     setopt noerr_return
     stop_server
-    rm -rf $TESTTMP $TESTROOT
+
+    [[ $TESTROOT == "/tmp/czhttpd-test" ]] && rm -rf $TESTROOT
+    [[ $TESTTMP == "/tmp/cztest-$$" ]] && rm -rf $TESTTMP
 }
 
 trap "sleep 0.1; cleanup 2>/dev/null; exit" INT TERM KILL EXIT ZERR
