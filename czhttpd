@@ -316,8 +316,6 @@ function mime_type() {
 #       - We can't use `zsystem flock` since child shells won't respect lock
 #       - LOCK will be declared global so that all f()s have access
 function mklock() {
-    [[ -n $LOCK ]] && return 1
-
     typeset -g LOCK=${1}.lock
     local timer_pid
 
