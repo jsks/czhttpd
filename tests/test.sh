@@ -1,5 +1,7 @@
-#!/usr/bin/zsh
+#!/usr/bin/env zsh
+#
 # Testing script for czhttpd. Individual tests split into test_*.sh.
+###
 
 autoload colors
 (( $terminfo[colors] >= 8 )) && colors
@@ -14,6 +16,8 @@ STATS[count]=0
 STATS[pass]=0
 STATS[fail]=0
 
+# Since we can't have arrays within arrays...
+typeset -ga CONNECT_TIMES SEND_TIMES FBYTE_TIMES DOWNLOAD_TIMES
 
 typeset -g DESC_STR
 
@@ -30,6 +34,8 @@ function assert() {
         (( STATS[fail]++ )) || :
         assert_strs+="$fg[red]✗$fg[white] $i ($fg[blue]$opts[$i]$fg[white])"
     fi
+
+    return 0
 }
 
 function md5hash () {
@@ -95,6 +101,12 @@ function check() {
     output="$TESTTMP/${@[-1]:t}.output"
     get_http --output $output $*
 
+    # Add to global arrays to keep track of timings for final stats
+    CONNECT_TIMES+=$(chttp::calc_time connect)
+    SEND_TIMES+=$(chttp::calc_time send)
+    FBYTE_TIMES+=$(chttp::calc_time first_byte)
+    DOWNLOAD_TIMES+=$(chttp::calc_time download)
+
     for i in ${(k)opts}; do
         case $i in
             ("--file_compare")
@@ -130,22 +142,37 @@ function info() {
     print "URL: $CHTTP_URL"
     chttp::print_headers
     print "$fg[yellow]Download size:$fg[white] $CHTTP_DOWNLOAD_SIZE"
-    printf "$fg[yellow]Times:$fg[white]  %.3fs connect\n\t%.3fs send\n\
-        %.3fs first_byte\n\t%.3fs download\n" \
-        $(chttp::calc_time connect) $(chttp::calc_time send) \
-        $(chttp::calc_time first_byte) \
-        $(chttp::calc_time download)
-    printf "\t$fg[magenta]%.3fs Total Time$fg[white]\n" \
-        $(( $(chttp::calc_time connect) + $(chttp::calc_time send) \
-        + $(chttp::calc_time download) ))
+
+    printf "$fg[yellow]Times:$fg[white]  %.2f ms connect\n\t%.2f ms send\n\
+        %.2f ms first_byte\n\t%.2f ms download\n" \
+        $CONNECT_TIMES[-1] $SEND_TIMES[-1] $FBYTE_TIMES[-1] $DOWNLOAD_TIMES[-1]
+    printf "\t$fg[magenta]%.2f ms Total Time$fg[white]\n\n" \
+        $(( $CONNECT_TIMES[-1] + $SEND_TIMES[-1] + \
+              $FBYTE_TIMES[-1] + $DOWNLOAD_TIMES[-1] ))
+}
+
+function avg() {
+    printf "%.2f ms" $(( (${(Pj.+.)1}) / ${(P)#1} ))
 }
 
 function print_stats() {
 <<EOF
 $fg[blue]Total Tests$fg[white]: $STATS[count], \
 $fg[blue]Assertions$fg[white]: $(( STATS[pass] + STATS[fail] )) -> \
-$fg[green]$STATS[pass] Passed$fg[white], \
-$fg[red]$STATS[fail] Failed$fg[white]
+$fg_bold[green]$STATS[pass] ✓$fg_no_bold[white], \
+$fg_bold[red]$STATS[fail] ✗$fg_no_bold[white]
+EOF
+
+   # Wrapping heredocs in conditionals is ugly, just return early if
+   # verbose isn't set
+(( !VERBOSE )) && return 0
+
+<<EOF
+$fg[magenta]Avg Times: $fg_bold[white]$(avg CONNECT_TIMES) $fg_no_bold[white]connect
+           $fg_bold[white]$(avg SEND_TIMES) $fg_no_bold[white]send
+           $fg_bold[white]$(avg FBYTE_TIMES) $fg_no_bold[white]first_byte
+           $fg_bold[white]$(avg DOWNLOAD_TIMES) $fg_no_bold[white]download
+
 EOF
 }
 
@@ -257,10 +284,11 @@ start_server
 heartbeat
 
 for i in ${1:-$SRC_DIR/tests/test_*.sh}; do
-    print "$fg[magenta]$i$fg[white]"
+    (( VERBOSE )) && print "$fg_bold[magenta]${i:t}$fg_no_bold[white]"
     source $i
 done
 
 print_stats
+
 # Allow all tests to finish, but return w/ err if necessary
 return ${STATS[fail]:-0}
