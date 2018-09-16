@@ -771,7 +771,7 @@ function cz_init() {
     fi
 }
 
-trap "cleanup 2>/dev/null; exit" INT KILL TERM; trap '' PIPE
+trap "cleanup 2>/dev/null; exit" INT TERM KILL EXIT; trap '' PIPE
 
 cz_init || error "Failed to initialize czhttpd"
 http_listen
@@ -786,20 +786,23 @@ while :; do
         continue
     fi
 
-    ( trap "ztcp -c; rmlock 2>/dev/null; exit" KILL TERM INT EXIT; trap '' PIPE; trap - CHLD HUP
-    setopt err_return
+    ( trap "ztcp -c; rmlock 2>/dev/null; exit" INT TERM KILL EXIT
+      trap '' PIPE; trap - CHLD HUP
 
-    while :; do
-        # err_return does not work in condition expressions, see:
-        # http://www.zsh.org/mla/users/2012/msg00816.html
-        parse_request
-        check_request
-        srv
+      setopt err_return
 
-        [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && break
-    done ) >&$fd 2> >(pid=$sysparams[ppid]; \
-                      sysread buff; \
-                      [[ -n $buff ]] && log_err "${(f)buff}") &
+      while :; do
+          # err_return does not work in condition expressions, see:
+          # http://www.zsh.org/mla/users/2012/msg00816.html
+          parse_request
+          check_request
+          srv
+
+          [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && \
+              break
+      done ) >&$fd 2> >(pid=$sysparams[ppid]; \
+                             sysread buff; \
+                             [[ -n $buff ]] && log_err "${(f)buff}") &
 
     conn_list+=$!
     ztcp -c $fd
