@@ -17,7 +17,6 @@ INDEX_FILE=index.html
 HIDDEN_FILES=0
 FOLLOW_SYMLINKS=0
 CACHE=0
-CACHE_DIR="/tmp/.czhttpd-$$"
 LOG_FILE="/dev/null"
 EOF
 reload_conf

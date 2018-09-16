@@ -16,7 +16,6 @@ INDEX_FILE=0
 HIDDEN_FILES=1
 FOLLOW_SYMLINKS=0
 CACHE=1
-CACHE_DIR="/tmp/.czhttpd-$$"
 LOG_FILE=/dev/null
 
 typeset -g COMPRESS=0
@@ -50,7 +49,6 @@ typeset -g COMPRESS_TYPES="text/html,text/plain"
 typeset -g COMPRESS_LEVEL=6
 typeset -g COMPRESS_MIN_SIZE=100
 typeset -g COMPRESS_CACHE=1
-typeset -g COMPRESS_CACHE_DIR="/tmp/.czhttpd-$$"
 source $SRC_DIR/modules/compress.sh
 EOF
 reload_conf

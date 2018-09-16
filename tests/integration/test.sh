@@ -19,10 +19,12 @@ STATS[fail]=0
 # Since we can't have arrays within arrays...
 typeset -ga CONNECT_TIMES SEND_TIMES FBYTE_TIMES DOWNLOAD_TIMES
 
-typeset -g DESC_STR
+typeset -ga TRACE_FUNCS STEPWISE
+typeset -g DESC_STR VERBOSE
 
-integer debugfd
-typeset -g PID
+readonly -g TEST_DIR=${0:A:h}
+
+source $TEST_DIR/../utils.sh
 
 function assert() {
     if [[ $3 =~ $2 ]]; then
@@ -44,11 +46,6 @@ function md5hash () {
     else
         md5 -q $1
     fi
-}
-
-function error() {
-    print "$*" >&2
-    exit 115
 }
 
 function help() {
@@ -176,51 +173,11 @@ $fg[magenta]Avg Times: $fg_bold[white]$(avg CONNECT_TIMES) $fg_no_bold[white]con
 EOF
 }
 
-function start_server() {
-    setopt noerr_return
-
-    zsh $SRC_DIR/czhttpd -v -p $PORT -c $CONF $TESTROOT >&$debugfd &
-    PID=$!
-}
-
-function stop_server() {
-    kill -15 $PID
-    sleep 0.1
-    kill -0 $pid 2>/dev/null && return 1 || return 0
-}
-
-function heartbeat() {
-    repeat 3; do
-        sleep 0.1
-        if ! kill -0 $PID 2>/dev/null; then
-            ((PORT++))
-            start_server
-        else
-            return 0
-        fi
-    done
-
-    return 1
-}
-
-function reload_conf() {
-    kill -HUP $PID
-    heartbeat
-}
-
-function cleanup() {
-    setopt noerr_return
-    stop_server
-    rm -rf $TESTTMP $TESTROOT
-}
-
 zparseopts -D -A opts -verbose v -stepwise: s: -trace: t: -log: l: -port: p: -help h || error "Failed to parse args"
 
 for i in ${(k)opts}; do
     case $i in
         ("--stepwise"|"-s")
-            typeset -a STEPWISE
-
             for i in ${(s.,.)opts[$i]}; do
                 if [[ -n ${(SM)i#-} ]]; then
                     for j in {${i[(ws.-.)1]}..${i[(ws.-.)2]}}; do
@@ -231,17 +188,12 @@ for i in ${(k)opts}; do
                 fi
             done;;
         ("--trace"|"-t")
-            typeset -a TRACE_FUNCS
             for i in ${(s.,.)opts[$i]}; TRACE_FUNCS+=(${(z)i});;
         ("--verbose"|"-v")
             VERBOSE=1;;
         ("--log"|"-l")
-            if [[ -f $opts[$i] ]]; then
-                : >> $opts[$i]
-                exec {debugfd}>>$opts[$i]
-            else
-                error "Invalid logfile"
-            fi;;
+            : >> $opts[$i] 2>/dev/null || error "Invalid logfile"
+            exec {debugfd}>>$opts[$i];;
         ("--port"|"-p")
             if [[ $opts[$i] == <-> ]]; then
                 typeset -g PORT=$opts[$i]
@@ -253,24 +205,10 @@ for i in ${(k)opts}; do
     esac
 done
 
-: ${PORT:=8080}
+(( ! debugfd )) && exec {debugfd} >/dev/null
 : ${VERBOSE:=0}
-[[ $debugfd  == 0 ]] && exec {debugfd}>/dev/null
-
-SRC_DIR=$(git rev-parse --show-toplevel)
 
 source $SRC_DIR/http_client
-
-trap "sleep 0.1; cleanup 2>/dev/null; exit" INT TERM KILL EXIT ZERR
-
-TESTTMP=/tmp/cztest-$$
-mkdir "$TESTTMP"
-
-TESTROOT=/tmp/czhttpd-test
-mkdir $TESTROOT
-
-CONF="$TESTROOT/cz.conf"
-: > $CONF
 
 mkdir $TESTROOT/dir
 print hejsan > $TESTROOT/index.html
@@ -283,7 +221,7 @@ ln -s $TESTROOT/file.txt $TESTROOT/link
 start_server
 heartbeat
 
-for i in ${1:-$SRC_DIR/tests/test_*.sh}; do
+for i in ${1:-$TEST_DIR/test_*.sh}; do
     (( VERBOSE )) && print "$fg_bold[magenta]${i:t}$fg_no_bold[white]"
     source $i
 done
