@@ -1,0 +1,3 @@
+*.log
+tests/stress/html
+tests/stress/report
