@@ -17,6 +17,9 @@ fi
 
 #setopt warn_create_global
 
+# Needed for return_header_hook
+zmodload zsh/regex
+
 ###
 # DBG_IN -> array[child pid] = bytes read
 # DBG_OUT -> array[child pid] = bytes sent
@@ -44,9 +47,20 @@ function dbg_add() {
 
 function log_dbg() {
     local cur_time
-    get_time
 
-    print "[$cur_time] [pid: ${pid:-$sysparams[pid]}] Debug -> $*" >&$logfd
+    # Unlike 'log_f' or 'log_err' we can't log in a subshell here
+    # because, for example, `<(send_chunk)` + STDOUT triggers sending
+    # all debug logging info to the client.
+    if ! print -nu $logfd 2>/dev/null; then
+        if (( ! STDOUT )); then
+            exec {logfd}>>$LOG_FILE
+        else
+            exec {logfd}>/dev/null
+        fi
+    fi
+
+    get_time
+    print -u $logfd "[$cur_time] [pid: ${pid:-$sysparams[pid]}] Debug -> $*"
 }
 
 function log_headers() {
