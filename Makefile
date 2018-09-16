@@ -2,10 +2,10 @@ all: test
 .PHONY: test start stress
 
 start:
-	@zsh -f tests/start.sh
+	@zsh -f test/start.sh
 
 test:
-	@zsh -f tests/integration/test.sh -l test.log -t srv
+	@zsh -f test/integration/test.sh -l test.log -t srv
 
 stress:
-	@zsh -f tests/stress/stress.sh -l stress.log
+	@zsh -f test/stress/stress.sh -l stress.log
