@@ -326,6 +326,8 @@ function mklock() {
         if ! kill -0 $timer_pid 2>/dev/null; then
             return 1
         fi
+
+        sleep 0.01
     done
 
     kill $timer_pid 2>/dev/null
