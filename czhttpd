@@ -135,7 +135,7 @@ function log_f() {
         fi
     fi
 
-    print "${(e@)LOG_FORMAT} $*" >&$logfd
+    print -u $logfd "${(e@)LOG_FORMAT} $*"
 }
 
 function log_err() {
@@ -150,7 +150,7 @@ function log_err() {
         fi
     fi
 
-    print "${(e@)LOG_FORMAT} Error -> $*" >&$logfd
+    print -u $logfd "${(e@)LOG_FORMAT} Error -> $*"
 }
 
 function help() {
