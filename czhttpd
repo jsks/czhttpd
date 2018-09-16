@@ -726,7 +726,6 @@ function cz_init() {
     log_f "MAX_CONN: ${MAX_CONN:=12}"
     log_f "PORT: ${PORT:=8080}"
     log_f "IP_REDIRECT: ${IP_REDIRECT:=$(ip_addr)}"
-    log_f "IP_ACCEPT: ${IP_ACCEPT:=[0-9*].[0-9*].[0-9*].[0-9*]}"
     log_f "HTTP_KEEP_ALIVE: ${HTTP_KEEP_ALIVE:=1}"
     log_f "HTTP_TIMEOUT: ${HTTP_TIMEOUT:=30}"
     log_f "HTTP_RECV_TIMEOUT: ${HTTP_RECV_TIMEOUT:=5}"
