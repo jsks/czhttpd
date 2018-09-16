@@ -31,6 +31,7 @@ zmodload zsh/parameter
 zmodload zsh/stat
 zmodload zsh/system
 zmodload zsh/net/tcp
+zmodload zsh/zutil
 
 ### zsh options
 # unset:
