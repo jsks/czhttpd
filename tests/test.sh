@@ -14,6 +14,9 @@ STATS[count]=0
 STATS[pass]=0
 STATS[fail]=0
 
+
+typeset -g DESC_STR
+
 integer debugfd
 typeset -g PID
 
@@ -21,12 +24,11 @@ function assert() {
     if [[ $3 =~ $2 ]]; then
         (( STATS[pass]++ )) || :
         if (( VERBOSE )); then
-            print "$fg[green]Passed$fg[white]: $i ($fg[blue]$opts[$i]$fg[white])"
+            assert_strs+="$fg[green]✓$fg[white] $i ($fg[blue]$opts[$i]$fg[white])"
         fi
     else
         (( STATS[fail]++ )) || :
-        RET=1
-        print "$fg[red]Failed$fg[white]: $i ($fg[blue]$opts[$i]$fg[white])"
+        assert_strs+="$fg[red]✗$fg[white] $i ($fg[blue]$opts[$i]$fg[white])"
     fi
 }
 
@@ -83,7 +85,11 @@ function get_http() {
 #   Everything else gets sent as args to `get_http`
 function check() {
     local -A opts
+    local -a assert_strs
     local output i
+
+    (( STATS[count]++ )) || :
+
     zparseopts -E -D -A opts -file_compare: -header_compare: -size_download: -http_code:
 
     output="$TESTTMP/${@[-1]:t}.output"
@@ -103,15 +109,20 @@ function check() {
         esac
     done
 
-    (( VERBOSE )) && info
+    if (( VERBOSE || ${#assert_strs} )); then
+        print "$fg[cyan]$STATS[count]$fg[white]. $DESC_STR"
+        for s in $assert_strs; print $s
+        info
+    fi
+
     [[ -n ${STEPWISE[(r)$STATS[count]]} ]] && { read -k '?Press any key to continue...' }
 
+    unset DESC_STR
     return 0
 }
 
 function describe() {
-    (( STATS[count]++ )) || :
-    print "$fg[cyan]$STATS[count]$fg[white]. $*"
+    typeset -g DESC_STR="$*"
 }
 
 function info() {
