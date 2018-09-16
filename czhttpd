@@ -122,34 +122,31 @@ function error() {
 }
 
 # Check that we have a valid fd and reset if necessary (ex: logging
-# within process substitution)
-function log_f() {
-    local cur_time
-    get_time
-
+# within process substitution).
+function check_logfd() {
     if ! print -nu $logfd 2>/dev/null; then
-        # Note: don't do `a && b || c`
         if (( STDOUT )); then
             exec {logfd}>&1
         else
             exec {logfd}>>$LOG_FILE
         fi
     fi
+}
+
+function log_f() {
+    local cur_time
+
+    check_logfd
+    get_time
 
     print -u $logfd "${(e@)LOG_FORMAT} $*"
 }
 
 function log_err() {
     local cur_time
-    get_time
 
-    if ! print -nu $logfd 2>/dev/null; then
-        if (( STDOUT )); then
-            exec {logfd}>&1
-        else
-            exec {logfd}>>$LOG_FILE
-        fi
-    fi
+    check_logfd
+    get_time
 
     print -u $logfd "${(e@)LOG_FORMAT} Error -> $*"
 }
