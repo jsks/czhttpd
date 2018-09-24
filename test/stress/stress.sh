@@ -1,4 +1,4 @@
-#!/usr/local/bin/zsh -f
+#!/usr/bin/env zsh
 #
 # Stress test/benchmark czhttpd using vegeta
 # (https://github.com/tsenart/vegeta)
