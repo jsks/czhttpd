@@ -732,13 +732,6 @@ function cleanup() {
 }
 
 ###
-# If child exits, connection has been closed so remove from our master array
-function TRAPCHLD() {
-    local i
-    for i in $conn_list; kill -0 $i 2>/dev/null || conn_list=(${conn_list#$i})
-}
-
-###
 # Signal to reload configuration
 function TRAPHUP() {
     cz_init || error "Failed to reload configuration"
@@ -825,8 +818,9 @@ while :; do
     ztcp -a $listenfd
     fd=$REPLY
 
-    if (( ${#conn_list} >= MAX_CONN )); then
     parse_ztcp
+
+    if (( ${#jobstates} >= MAX_CONN )); then
         error_header 503 >&$fd
         ztcp -c $fd
         continue
@@ -848,6 +842,5 @@ while :; do
              break
      done) >&$fd 2> >(capture_stderr) &
 
-    conn_list+=$!
     ztcp -c $fd
 done
