@@ -158,7 +158,7 @@ function capture_stderr() {
 
 function help() {
 <<EOF
-Usage: czhttpd [OPTIONS] <file or dir>
+Usage: czhttpd [OPTIONS] [file or dir]
 
 czhttpd - cloud's zsh http server
 
