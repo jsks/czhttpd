@@ -832,20 +832,20 @@ while :; do
         continue
     fi
 
-    ( trap "ztcp -c; rmlock 2>/dev/null; exit" INT TERM KILL EXIT
-      trap '' PIPE; trap - CHLD HUP
+    (trap "ztcp -c; rmlock 2>/dev/null; exit" INT TERM KILL EXIT
+     trap '' PIPE; trap - CHLD HUP
 
-      setopt err_return
+     setopt err_return
 
-      while :; do
-          # err_return does not work in condition expressions, see:
-          # http://www.zsh.org/mla/users/2012/msg00816.html
-          parse_request
-          check_request
-          srv
+     while :; do
+         # err_return does not work in condition expressions, see:
+         # http://www.zsh.org/mla/users/2012/msg00816.html
+         parse_request
+         check_request
+         srv
 
-          [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && \
-              break
+         [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && \
+             break
      done) >&$fd 2> >(capture_stderr) &
 
     conn_list+=$!
