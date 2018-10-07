@@ -73,14 +73,17 @@ check --http 1.0 127.0.0.1:$PORT \
 # Finally, let's check that our headers are being set properly
 describe "Client Connection: close"
 check --header 'Connection: close' 127.0.0.1:$PORT \
+      --http_code 200 \
       --header_compare 'Connection: close'
 
 describe "Client Connection: keep-alive"
 check --header 'Connection: keep-alive' 127.0.0.1:$PORT \
+      --http_code 200 \
       --header_compare 'Connection: keep-alive'
 
 describe "Server header"
 check --header 'Host: SuperAwesomeServ' 127.0.0.1:$PORT \
+      --http_code 200 \
       --header_compare 'Server: czhttpd'
 
 rm $TESTROOT/index.html
@@ -115,6 +118,7 @@ reload_conf
 
 describe "Keep alive disabled"
 check --header 'Connection: keep-alive' 127.0.0.1:$PORT \
+      --http_code 200 \
       --header_compare 'Connection: close'
 
 describe "Check maxed out connections"
