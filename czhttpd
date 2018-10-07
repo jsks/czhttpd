@@ -27,13 +27,8 @@ done
 export PATH=/sbin:/bin:/usr/bin:/usr/local/bin
 
 # Load Modules
-zmodload zsh/datetime
-zmodload zsh/files
-zmodload zsh/parameter
-zmodload zsh/stat
-zmodload zsh/system
-zmodload zsh/net/tcp
-zmodload zsh/zutil
+ml=(datetime files parameter stat system net/tcp zutil)
+for i in $ml; zmodload zsh/$i || exit 127
 
 ### zsh options
 # unset:
