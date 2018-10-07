@@ -6,7 +6,9 @@
 # Site: https://github.com/jsks/czhttpd
 ###
 
-# Several accumulated bug fixes since 5.6 that we need
+emulate -R zsh
+
+# Several accumulated bug fixes since 5.6
 if [[ $ZSH_VERSION < 5.6 ]]; then
     print 'Incompatible zsh version'
     exit 113
