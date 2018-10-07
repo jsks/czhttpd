@@ -8,7 +8,7 @@ typeset -g CONF="./_cz_test.conf"
 <<EOF > $CONF
 DEBUG=1
 typeset -ga DEBUG_TRACE_FUNCS
-DEBUG_TRACE_FUNCS=(srv)
+DEBUG_TRACE_FUNCS=(parse_request srv)
 source $SRC_DIR/modules/debug.sh
 
 IP_REDIRECT=127.0.0.1
