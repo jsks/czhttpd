@@ -151,6 +151,15 @@ function log_err() {
     print -u $logfd "${(e@)LOG_FORMAT} Error -> $*"
 }
 
+function capture_stderr() {
+    local pid buf
+
+    pid=$sysparams[ppid]
+    sysread buf
+
+    [[ -n $buf ]] && log_err "${(f)buf}"
+}
+
 function help() {
 <<EOF
 Usage: czhttpd [OPTIONS] <file or dir>
@@ -837,9 +846,7 @@ while :; do
 
           [[ $HTTP_KEEP_ALIVE == 0 || $req_headers[connection] == "close" ]] && \
               break
-      done ) >&$fd 2> >(pid=$sysparams[ppid]; \
-                             sysread buff; \
-                             [[ -n $buff ]] && log_err "${(f)buff}") &
+     done) >&$fd 2> >(capture_stderr) &
 
     conn_list+=$!
     ztcp -c $fd
