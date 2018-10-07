@@ -543,7 +543,9 @@ function return_header() {
 function error_header() {
     if [[ -n $HTTP_CODES[$1] ]]; then
         return_header "$1 $HTTP_CODES[$1]" "Content-type: text/plain; charset=UTF-8" "Content-length: $(( ${#1} + ${#HTTP_CODES[$1]} + 1))" $@[2,-1]
-        print -n "$1 $HTTP_CODES[$1]"
+
+        # Suppress EPIPE here too.
+        print -n "$1 $HTTP_CODES[$1]" 2>/dev/null
         log_f "$1 $HTTP_CODES[$1]"
     else
         log_err "Could not find status code $1"
