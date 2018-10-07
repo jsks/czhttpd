@@ -3,8 +3,10 @@
 # Testing script for czhttpd. Individual tests split into test_*.sh.
 ###
 
-autoload colors
-(( $terminfo[colors] >= 8 )) && colors
+if [[ -t 1 ]] && (( $terminfo[colors] >= 8 )); then
+    autoload colors
+    colors
+fi
 
 zmodload zsh/stat
 zmodload zsh/system
