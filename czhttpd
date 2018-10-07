@@ -373,6 +373,16 @@ function http_listen() {
     fi
 }
 
+function parse_ztcp() {
+    unset client_ip; typeset -g client_ip
+    local ip_line
+
+    sessions=$(ztcp -L)
+    for ip_line in ${(f@)sessions}; do
+        [[ $ip_line[3] == "I" ]] && { client_ip=${ip_line[(w)3]}; break }
+    done
+}
+
 ###
 # Would be marginally quicker to use sysread + we would have better return
 # values, but that would also add an insane amount of complexity (esp. wrt
@@ -807,6 +817,7 @@ while :; do
     fd=$REPLY
 
     if (( ${#conn_list} >= MAX_CONN )); then
+    parse_ztcp
         error_header 503 >&$fd
         ztcp -c $fd
         continue
