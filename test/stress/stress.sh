@@ -4,8 +4,10 @@
 # (https://github.com/tsenart/vegeta)
 ###
 
-autoload colors
-(( $terminfo[colors] >= 8)) && colors
+if [[ -t 1 ]] && (( $terminfo[colors] >= 8 )); then
+    autoload colors
+    colors
+fi
 
 setopt err_return
 
@@ -95,7 +97,7 @@ for i in {a..z}; print -n "Hello World!" > $TESTROOT/$i.html
 mkdir -p $REPORT_DIR $HTML_DIR
 rm -rf $REPORT_DIR/*.bin(N) $HTML_DIR/*.html(N)
 
-for i in ${1:-$STRESS_DIR/*.profile}; do
+for i in ${1:-$STRESS_DIR/stress_*.sh}; do
     print "$fg_bold[magenta]${i:t}$fg_no_bold[white]"
     source $i
 done
