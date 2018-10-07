@@ -407,80 +407,92 @@ function parse_request() {
         done
     done
 
-    parse_request_body
+    if [[ $req_headers[transfer-encoding] == "chunked" ]]; then
+        parse_req_body_chunked
+    elif [[ -n $req_headers[content-length] ]]; then
+        parse_req_body_fixed
+    fi
 }
 
-function parse_request_body() {
-    local buff
-    local -i count total
+function parse_req_body_chunked() {
+    local buff line
+    local -i count total offset chunk_size
 
-    if [[ $req_headers[transfer-encoding] == "chunked" ]]; then
-        local line
-        local -i offset chunk_size
+    while :; do
+        # Find our hexadecimal first
+        read -t $HTTP_RECV_TIMEOUT -r -u $fd line || { error_header 400; return 1 }
+        [[ -z ${line%$'\r'} ]] && continue
 
+        # If 0 we're at the end
+        [[ ${line%$'\r'} == 0 ]] && return 0
+
+        # Convert hex
+        chunk_size=$(printf '%d\n' 0x${line%$'\r'})
+
+        # Set bufsize to $chunk_size; h/o, sysread not guaranteed to read
+        # that many bytes so loop
         while :; do
-            # Find our hexadecimal first
-            read -t $HTTP_RECV_TIMEOUT -r -u $fd line
-            [[ -z ${line%$'\r'} ]] && continue
-
-            # If 0 we're at the end
-            [[ ${line%$'\r'} == 0 ]] && return 0
-
-            # Convert hex
-            chunk_size=$(printf '%d\n' 0x${line%$'\r'})
-
-            # Set bufsize to $chunk_size; h/o, sysread not guaranteed to read
-            # that many bytes so loop
-            while :; do
-                sysread -c count -t $HTTP_RECV_TIMEOUT -s $chunk_size -i $fd buff
-                total+=$count
-                req_headers[msg-body]+="$buff"
-
-                # When chunk_size == 0 we've read the right amount
-                (( ! (chunk_size-=count) )) && break
-            done
-
-            # Throw away CRLF
-            offset=2
-            while :; do
-                sysread -c count -o 1 -t $HTTP_RECV_TIMEOUT -s $offset -i $fd >/dev/null
-                (( ! (offset-=count) )) && break
-            done
-
-            (( total > HTTP_BODY_SIZE )) && { error_header 413; return 1 }
-            unset line
-        done
-
-        error_header 400; return 1
-    elif [[ -n $req_headers[content-length] ]]; then
-        local -i bufsize
-
-        [[ $req_headers[content-length] != <-> ]] && { error_header 400; return 1 }
-        (( req_headers[content-length] > HTTP_BODY_SIZE )) && { error_header 413; return 1 }
-
-        # Same; we can't guarantee that sysread will read $bufsize in one go.
-        bufsize=$req_headers[content-length]
-        while :; do
-
-            # This is ugly, but we want to break without error if body < length;
-            # requires extended_glob
-            sysread -c count -t $HTTP_RECV_TIMEOUT -s $bufsize -i $fd buff || {
-                case $? in
-                    (4)
-                        break;;
-                    (^0)
-                        return 1;;
-                esac
+            sysread -c count -t $HTTP_RECV_TIMEOUT -s $chunk_size -i $fd buff || {
+                error_header 400; return 1
             }
 
-            req_headers[msg-body]+="$buff"
             total+=$count
+            req_headers[msg-body]+="$buff"
 
-            (( ! (bufsize-=count) )) && break
+            # When chunk_size == 0 we've read the right amount
+            (( ! (chunk_size-=count) )) && break
         done
 
-        (( total != $req_headers[content-length] )) && { error_header 400; return 1 }
-    fi
+        # Throw away CRLF
+        offset=2
+        while :; do
+            sysread -c count -o 1 -t $HTTP_RECV_TIMEOUT -s $offset -i $fd >/dev/null
+            (( ! (offset-=count) )) && break
+        done
+
+        (( total > HTTP_BODY_SIZE )) && { error_header 413; return 1 }
+        unset line
+    done
+
+    error_header 400
+    return 1
+
+}
+
+
+function parse_req_body_fixed() {
+    local buff
+    local -i count total bufsize
+
+    local -i bufsize
+
+    [[ $req_headers[content-length] != <-> ]] && { error_header 400; return 1 }
+    (( req_headers[content-length] > HTTP_BODY_SIZE )) && { error_header 413; return 1 }
+
+    # Same; we can't guarantee that sysread will read $bufsize in one go.
+    bufsize=$req_headers[content-length]
+    while :; do
+
+        # This is ugly, but we want to break without error if body < length;
+        # requires extended_glob
+        sysread -c count -t $HTTP_RECV_TIMEOUT -s $bufsize -i $fd buff || {
+            case $? in
+                (4)
+                    break;;
+                (^0)
+                    return 1;;
+            esac
+        }
+
+        req_headers[msg-body]+="$buff"
+        total+=$count
+
+        (( ! (bufsize-=count) )) && break
+    done
+
+    (( total != $req_headers[content-length] )) && { error_header 400; return 1 }
+
+    return 0
 }
 
 function check_request() {
