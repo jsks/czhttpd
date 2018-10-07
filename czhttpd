@@ -36,12 +36,11 @@ for i in $ml; zmodload zsh/$i || exit 127
 #   glob_dots - prevent iterating through dot files automatically
 #   err_return - set only within `srv` to handle errors at highest level
 # set:
-#   posix_jobs - for handling jobs in communicating child->parent
 #   bare_glob_qual - required for our patterns in `list_dir`
 #   local_options - selectively turn on multios & err_return
 #   extended_glob - to allow negation case statement patterns
 unsetopt multibyte glob_dots err_return
-setopt posix_jobs bare_glob_qual local_options extended_glob
+setopt bare_glob_qual local_options extended_glob
 
 # Declare global variable types
 typeset -A MTYPES HTTP_CODES
