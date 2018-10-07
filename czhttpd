@@ -670,26 +670,26 @@ function __srv() {
     urldecode ${1:-$req_headers[url]}
     pathname="${DOCROOT}$decoded_url"
 
-    [[ $HIDDEN_FILES != "1" && ${pathname:t} == .* ]] && { error_header 403; return }
-    [[ $FOLLOW_SYMLINKS != "1" && -h ${pathname%/} ]] && { error_header 403; return }
+    [[ $HIDDEN_FILES != 1 && ${pathname:t} == .* ]] && { error_header 403; return }
+    [[ $FOLLOW_SYMLINKS != 1 && -h ${pathname%/} ]] && { error_header 403; return }
 
     { if [[ -f ${pathname%/} ]]; then
-        handler ${pathname:A}
-    elif [[ -d $pathname ]]; then
-        if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
-            error_header 301 "Location: http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
-        elif [[ -f $pathname/$INDEX_FILE ]]; then
-            handler $pathname/$INDEX_FILE
-        else
-            if [[ -r "$pathname" && -x "$pathname" ]]; then
-                handler "$pathname"
-            else
-                error_header 403
-            fi
-        fi
-    else
-        error_header 404
-    fi } always { [[ $? != 0 ]] && error_header 500 }
+          handler ${pathname:A}
+      elif [[ -d $pathname ]]; then
+          if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
+              error_header 301 "Location: http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
+          elif [[ -f $pathname/$INDEX_FILE ]]; then
+              handler $pathname/$INDEX_FILE
+          else
+              if [[ -r "$pathname" && -x "$pathname" ]]; then
+                  handler "$pathname"
+              else
+                  error_header 403
+              fi
+          fi
+      else
+          error_header 404
+      fi } always { [[ $? != 0 ]] && error_header 500 }
 }
 
 ### Misc
