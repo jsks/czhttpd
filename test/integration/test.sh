@@ -213,7 +213,7 @@ done
 (( ! debugfd )) && exec {debugfd} >/dev/null
 : ${VERBOSE:=0}
 
-source $SRC_DIR/http_client
+source $SRC_DIR/test/http_client
 
 mkdir $TESTROOT/dir
 print hejsan > $TESTROOT/index.html
