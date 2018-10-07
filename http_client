@@ -34,7 +34,7 @@ integer CHTTP_DOWNLOAD_SIZE
 
 typeset -a __ADD_HEADERS
 typeset __HOST __PORT __REQ_DATA __REQUEST __CHUNKED
-integer __RECV_TIMEOUT=10
+integer __RECV_TIMEOUT=10 __SELECT_TIMEOUT=2000
 
 integer __fd __verbosefd __outfd
 
@@ -111,8 +111,7 @@ function chttp::parse_args() {
 }
 
 function chttp::connect() {
-    unset CHTTP_TIMES; typeset -gA CHTTP_TIMES
-    unset REPLY
+    unset CHTTP_TIMES REPLY __fd; typeset -gA CHTTP_TIMES
     local -F start stop
 
     repeat 3; do
@@ -205,7 +204,8 @@ function chttp::read_response() {
     local line key value
     local -F start stop
 
-    zselect -r $__fd && start=$EPOCHREALTIME || return 1
+    zselect -t $__SELECT_TIMEOUT -r $__fd
+    start=$EPOCHREALTIME
 
     read -t $__RECV_TIMEOUT -r -u $__fd line
     CHTTP_RESP_HEADERS[status_line]="${line%$'\r'}"
