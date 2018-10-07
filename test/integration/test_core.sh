@@ -118,7 +118,6 @@ reload_conf
 
 describe "Keep alive disabled"
 check --header 'Connection: keep-alive' 127.0.0.1:$PORT \
-      --http_code 200 \
       --header_compare 'Connection: close'
 
 describe "Check maxed out connections"
