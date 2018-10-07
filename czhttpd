@@ -378,15 +378,24 @@ function http_listen() {
 # values, but that would also add an insane amount of complexity (esp. wrt
 # pipelining).
 #
-# Ex: One of our shortcomings now is that we don't know why `read` may fail,
-# so we can't return a 408 on timeout.
+# Ex: One of our shortcomings now is that we don't know why read may
+# fail, so we can't return a 408 on timeout. Instead we just
+# incorrectly blanket return 400 for all errors encountered when
+# parsing a request.
 function parse_request() {
     unset req_headers; typeset -gA req_headers
     local method url version key value line
 
-    # Use HTTP_TIMEOUT for first read since we're blocking until initial bytes
-    # from request
-    read -t $HTTP_TIMEOUT -r -u $fd line
+    # Use HTTP_TIMEOUT for first read since we're blocking until
+    # initial bytes from request. We only return 400 when client has
+    # sent data since we may hit EOF when keep-alive is enabled and
+    # client has closed connection after single request. If client
+    # closes in the middle of any other reads, send 400 and simply
+    # suppress EPIPE.
+    read -t $HTTP_TIMEOUT -r -u $fd line || {
+        [[ -n $line ]] && error_header 400
+        return 1
+    }
 
     for method url version in ${(s. .)line%$'\r'}; do
         req_headers[method]="$method"
@@ -396,7 +405,7 @@ function parse_request() {
     done
 
     while :; do
-        read -t $HTTP_RECV_TIMEOUT -r -u $fd line
+        read -t $HTTP_RECV_TIMEOUT -r -u $fd line || { error_header 400; return 1 }
         [[ -z $line || $line == $'\r' ]] && break
 
         for key value in ${(s.: .)line%$'\r'}; do
