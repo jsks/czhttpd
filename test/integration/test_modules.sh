@@ -1,4 +1,52 @@
-# url_rewrite
+# Start first making sure modules stay disabled when loaded
+<<EOF > $CONF
+DEBUG=1
+typeset -ga DEBUG_TRACE_FUNCS
+DEBUG_TRACE_FUNCS=($TRACE_FUNCS)
+source $SRC_DIR/modules/debug.sh
+
+URL_REWRITE=0
+CGI_ENABLE=0
+COMPRESS=0
+
+typeset -gA URL_PATTERNS
+URL_PATTERNS=( "/file.txt" "/.dot.txt" )
+
+typeset -g CGI_EXTS="sh"
+
+source $SRC_DIR/modules/url_rewrite.sh
+source $SRC_DIR/modules/cgi.sh
+source $SRC_DIR/modules/compress.sh
+EOF
+reload_conf
+
+# Disabled url_rewrite
+describe "URL rewrite is loaded but disabled"
+check 127.0.0.1:$PORT/file.txt \
+      --http_code 200 \
+      --file_compare $TESTROOT/file.txt \
+      --header_compare 'Content-type: text/plain'
+
+# Disabled gzip
+describe "Compressed loaded but disabled"
+check --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT \
+      --http_code 200 \
+      --header_compare 'Content-Encoding: ^(?!.*gzip).*$'
+
+<<EOF > $TESTROOT/test_app.sh
+#!/bin/zsh
+print "Content-type: text/plain\n\n"
+print "Hello World"
+EOF
+chmod +x $TESTROOT/test_app.sh
+
+# Disabled cgi
+describe "CGI is loaded but disabled"
+check 127.0.0.1:$PORT/test_app.sh \
+      --http_code 200 \
+      --file_compare $TESTROOT/test_app.sh
+
+# Enable url_rewrite
 <<EOF > $CONF
 DEBUG=1
 typeset -ga DEBUG_TRACE_FUNCS
@@ -34,7 +82,7 @@ check 127.0.0.1:$PORT/file.txt \
       --file_compare $TESTROOT/.dot.txt \
       --header_compare 'Content-type: text/plain'
 
-# gzip
+# Enable gzip
 <<EOF > $CONF
 DEBUG=1
 typeset -ga DEBUG_TRACE_FUNCS
@@ -75,7 +123,7 @@ check --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT \
 
 rm $TESTROOT/compress.txt $TESTROOT/compress.txt.gz
 
-# CGI Module
+# Enable CGI Module
 <<EOF > $CONF
 DEBUG=1
 typeset -ga DEBUG_TRACE_FUNCS

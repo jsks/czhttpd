@@ -8,10 +8,11 @@ if [[ -t 1 ]] && (( $terminfo[colors] >= 8 )); then
     colors
 fi
 
+zmodload zsh/pcre
 zmodload zsh/stat
 zmodload zsh/system
 
-setopt err_return
+setopt err_return rematch_pcre
 
 typeset -gA STATS
 STATS[count]=0
