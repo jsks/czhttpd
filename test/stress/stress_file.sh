@@ -32,6 +32,13 @@ attack no_keep-alive_file
 
 # Single file compress
 <<EOF > $CONF
+typeset -g COMPRESS=1
+typeset -g COMPRESS_TYPES="text/html,text/plain"
+typeset -g COMPRESS_LEVEL=6
+typeset -g COMPRESS_MIN_SIZE=100
+typeset -g COMPRESS_CACHE=0
+source $SRC_DIR/modules/compress.sh
+
 MAX_CONN=12
 HTTP_KEEP_ALIVE=1
 HTTP_TIMEOUT=30
@@ -39,13 +46,6 @@ HTTP_RECV_TIMEOUT=5
 HTTP_BODY_SIZE=16384
 CACHE=0
 
-COMPRESS=1
-
-typeset -g COMPRESS_TYPES="text/html,text/plain"
-typeset -g COMPRESS_LEVEL=6
-typeset -g COMPRESS_MIN_SIZE=100
-typeset -g COMPRESS_CACHE=0
-source $SRC_DIR/modules/compress.sh
 EOF
 reload_conf
 
@@ -54,6 +54,13 @@ attack compress_file
 
 # Single file compress with cache
 <<EOF > $CONF
+typeset -g COMPRESS=1
+typeset -g COMPRESS_TYPES="text/html,text/plain"
+typeset -g COMPRESS_LEVEL=6
+typeset -g COMPRESS_MIN_SIZE=100
+typeset -g COMPRESS_CACHE=1
+source $SRC_DIR/modules/compress.sh
+
 MAX_CONN=12
 HTTP_KEEP_ALIVE=1
 HTTP_TIMEOUT=30
@@ -61,13 +68,6 @@ HTTP_RECV_TIMEOUT=5
 HTTP_BODY_SIZE=16384
 CACHE=1
 
-COMPRESS=1
-
-typeset -g COMPRESS_TYPES="text/html,text/plain"
-typeset -g COMPRESS_LEVEL=6
-typeset -g COMPRESS_MIN_SIZE=100
-typeset -g COMPRESS_CACHE=1
-source $SRC_DIR/modules/compress.sh
 EOF
 reload_conf
 

@@ -87,7 +87,7 @@ root=$TESTROOT
 readonly -g root
 
 # For single file stress tests
-for i in {1..1000}; str+="lorem ipsum"
+for i in {1..10000}; str+="lorem ipsum"
 print $str > $TESTROOT/test.html
 
 # For directory listing stress tests
