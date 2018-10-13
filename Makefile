@@ -1,7 +1,7 @@
 PID := $(shell cat .czhttpd-pid)
 
 all: test
-.PHONY: test start stress
+.PHONY: start debug reload test stress
 
 start:
 	@zsh -f test/start.sh
