@@ -11,14 +11,9 @@
 
 : ${DEBUG:=0}
 
-if (( $DEBUG != 1 )); then
-    return
-fi
+(( ! DEBUG )) && return
 
 #setopt warn_create_global
-
-# Needed for return_header_hook
-zmodload zsh/regex
 
 ###
 # DBG_IN -> array[child pid] = bytes read
@@ -27,6 +22,8 @@ zmodload zsh/regex
 #     how many bytes read/sent through socket
 typeset -gA DBG_IN DBG_OUT
 typeset -gi DBG_CONN_COUNT
+
+typeset -ga conn_list
 
 typeset -gi dbg_fifofd
 typeset -g dbg_sfile
@@ -40,6 +37,10 @@ dbg_sfile="/tmp/czhttpd-stats-$$.$RANDOM"
 mkfifo $dbg_sfile || { print "Unable to initialize debug.sh"; return }
 exec {dbg_fifofd}<>$dbg_sfile
 rm $dbg_sfile 2>/dev/null
+
+function is_alive() {
+    kill -0 $1 2>/dev/null
+}
 
 function dbg_add() {
     print "$sysparams[pid] $*" >&$dbg_fifofd
@@ -98,23 +99,24 @@ function return_header_hook() {
 }
 
 function srv_hook() {
-    local msg
+    local msg decoded_url pathname
 
-    log_headers
+    urldecode $1
+    pathname="${DOCROOT}$decoded_url"
 
-    if [[ ! -e $1 ]]; then
+    if [[ ! -e $pathname ]]; then
         msg="nonexistent"
-    elif [[ -f $1 ]]; then
+    elif [[ -f $pathname ]]; then
         msg="file"
-    elif [[ -d $1 ]]; then
+    elif [[ -d $pathname ]]; then
         msg="directory"
-    elif [[ -h $1 ]]; then
+    elif [[ -h $pathname ]]; then
         msg="symbolic link"
     else
         msg="unknown type"
     fi
 
-    log_dbg "$dbg_cmd: requested resource $1 is $msg"
+    log_dbg "$dbg_cmd: requested resource $pathname is $msg"
 }
 
 # This function will be run everywhere, take special care with namespace
@@ -138,15 +140,26 @@ function debug_handler() {
     done
 
     case $dbg_cmd in
-        ('conn_list+=$!')
-            (( DBG_CONN_COUNT++ ))
-            log_dbg "new connection ($!); $((${#conn_list} + 1)) current connection(s)";;
+        ('ztcp')
+            # We're trying to capture the `ztcp -c` executed after
+            # backgrounding a subshell to handle the latest connection
+            if [[ $dbg_args == '-c $fd' && \
+                      $ZSH_EVAL_CONTEXT == 'toplevel:trap:shfunc' && \
+                      -z ${conn_list[(r)$!]} ]] && \
+               is_alive $!; then
+                conn_list+=$!
+                (( DBG_CONN_COUNT++ ))
+
+                log_dbg "new connection ($!); ${#conn_list} current connection(s)"
+            fi;;
         ('printf')
             if [[ $dbg_args == "'%x"* ]]; then
                 dbg_add "sent $(( ${#buff} + 2 ))"
             fi;;
-        ('srv')
-            srv_hook "${DOCROOT}$(urldecode $req_headers[url])";;
+        ('check_request')
+            log_headers;;
+        ('__srv')
+            srv_hook ${1:-$req_headers[url]};;
         ('send_file')
             dbg_add "sent $fsize"
             log_dbg "$dbg_cmd: $pathname";;
@@ -170,7 +183,7 @@ function TRAPCHLD() {
     done
 
     for i in $conn_list; do
-        if ! kill -0 $i 2>/dev/null; then
+        if ! is_alive $i; then
             conn_list=(${conn_list#$i})
             log_dbg "($i) disconnected; ${#conn_list} current connection(s)"
             log_dbg "($i) Sent: ${DBG_OUT[$i]:-0} Read: ${DBG_IN[$i]:-0}"
