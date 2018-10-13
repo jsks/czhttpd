@@ -6,12 +6,14 @@ all: test
 start:
 	@zsh -f test/start.sh
 
+debug:
+	@zsh -f test/start.sh --full-debug
 
 reload:
 	@kill -0 $(PID) && kill -HUP $(PID)
 
 test:
-	@zsh -f test/integration/test.sh -l test.log -t srv,parse_request
+	@zsh -f test/integration/test.sh -l test.log
 
 stress:
 	@zsh -f test/stress/stress.sh -l stress.log
