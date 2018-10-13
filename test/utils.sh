@@ -25,6 +25,9 @@ function start_server() {
     zsh -f $SRC_DIR/czhttpd -v -p $PORT -c $CONF $TESTROOT >&$debugfd &
     typeset +r -g PID=$!
     readonly -g PID
+
+    # Cache current czhttpd pid for Makefile
+    print $PID > $SRC_DIR/.czhttpd-pid
 }
 
 function stop_server() {
@@ -60,6 +63,8 @@ function cleanup() {
 
     [[ $TESTROOT == "/tmp/czhttpd-test" ]] && rm -rf $TESTROOT
     [[ $TESTTMP == "/tmp/cztest-$$" ]] && rm -rf $TESTTMP
+
+    rm -rf $SRC_DIR/.czhttpd-pid
 }
 
 trap "sleep 0.1; cleanup 2>/dev/null; exit" INT TERM KILL EXIT ZERR
