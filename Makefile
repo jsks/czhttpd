@@ -1,4 +1,4 @@
-PID := $(shell cat .czhttpd-pid)
+PID := $(shell cat .czhttpd-pid 2>/dev/null)
 
 all: test
 .PHONY: start debug reload test stress
