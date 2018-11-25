@@ -10,7 +10,7 @@
 : ${CGI_EXTS:="php"}
 : ${CGI_TIMEOUT=300}
 
-function handler() { cgi_handler $* }
+rename_fn handler cz::handler
 
 readonly GATEWAY_INTERFACE="CGI/1.1"
 
@@ -33,11 +33,11 @@ function timeout() {
     return pid_status
 }
 
-function cgi_handler() {
+function handler() {
     if check_if_cgi $1; then
         exec_cgi $1
     else
-        __handler $1
+        cz::handler $1
     fi
 }
 

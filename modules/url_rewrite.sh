@@ -2,17 +2,18 @@
 
 : ${URL_REWRITE:=0}
 zmodload zsh/pcre
-function srv() { url_rewrite $* }
 
-function url_rewrite() {
+rename_fn srv cz::srv
+
+function srv() {
     if [[ $URL_REWRITE == 1 ]]; then
         for i in ${(k)URL_PATTERNS}; do
             if [[ $req_headers[url] -pcre-match $i ]]; then
                 log_f "rewrite match: $req_headers[url] -> ${URL_PATTERNS[$i]}"
-                __srv ${URL_PATTERNS[$i]}; return $?
+                cz::srv ${URL_PATTERNS[$i]}; return $?
             fi
         done
     fi
 
-    __srv $req_headers[url]; return $?
+    cz::srv $req_headers[url]; return $?
 }

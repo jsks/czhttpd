@@ -9,6 +9,11 @@
 : ${COMPRESS_CACHE:=1}
 : ${COMPRESS_CACHE_DIR:=/tmp/.czhttpd-$$}
 
+if [[ $COMPRESS != [01] ]]; then
+    log_err "Invalid integer for COMPRESS"
+    return 1
+fi
+
 if [[ $COMPRESS_LEVEL != <-> ]]; then
     log_err "Invalid integer for COMPRESS_LEVEL"
     return 1
@@ -27,11 +32,11 @@ fi
 (( COMPRESS_CACHE )) && [[ ! -d $COMPRESS_CACHE_DIR ]] && mkdir $COMPRESS_CACHE_DIR
 typeset -ga COMPRESS_TYPES_ARRAY=(${(s.,.)COMPRESS_TYPES})
 
-function send() { compress_filter $* }
+rename_fn send cz::send
 
-function compress_filter() {
+function send() {
     if ! check_if_compression $1; then
-        __send $1; return $?
+        cz::send $1; return $?
     fi
 
     if (( COMPRESS_CACHE )) && [[ -n $1 ]]; then

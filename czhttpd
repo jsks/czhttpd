@@ -105,6 +105,28 @@ function ip_addr() {
     esac
 }
 
+# This is crude, but we want modules to be able to transparently
+# override main functions. Previously, we prefixed the main functions
+# in czhttpd with '__' and defined a wrapper function which executed
+# the appropriate function (ex: `__send` vs the `send` defined in
+# 'compress.sh').
+#
+# This way we don't have to modify the main source code for each
+# module and simply dynamically rename the functions we want to
+# override with the caveat that obviously two modules can't override
+# the same function, but that was already a prior restriction.
+#
+# Note, we can't use aliases because "alias names are resolved when
+# the function is read."
+function rename_fn() {
+    # New function name already defined. If we reload czhttpd we don't
+    # want to rename and lose the old fn definition.
+    [[ ${+functions[$2]} == 1 ]] && return
+
+    local f=$(typeset -f $1)
+    eval "$2 ${f[(w)2,-1]}"
+}
+
 ### Logging/info functions
 function error() {
     local cur_time
@@ -640,7 +662,7 @@ function send_chunk() {
 
 ### Wrapper functions
 # Determines whether to send stream/file in chunks or as whole
-function __send() {
+function send() {
     if [[ -n $1 ]]; then
         return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $fsize"
         send_file $1
@@ -654,7 +676,7 @@ function __send() {
 
 ###
 # How to fulfill valid request (create directory listing or send a file etc etc)
-function __handler() {
+function handler() {
     if [[ -f $1 ]]; then
         local mtype
         local -a fsize
@@ -682,7 +704,7 @@ function __handler() {
 
 ###
 # Can we fulfill the request?
-function __srv() {
+function srv() {
     local pathname decoded_url
 
     urldecode ${1:-$req_headers[url]}
@@ -741,13 +763,6 @@ function cz_init() {
     parse_conf $CONFIG
 
     log_f "> Initializing czhttpd"
-
-    # Default callback functions, allows modules to override how we handle
-    # requests. Can't be simple aliases since shell won't find the cmd
-    ! typeset -f send >/dev/null && function send() { __send $* }
-    ! typeset -f handler >/dev/null && function handler() { __handler $* }
-    ! typeset -f srv >/dev/null && function srv() { __srv $* }
-
     log_f "MAX_CONN: ${MAX_CONN:=12}"
     log_f "PORT: ${PORT:=8080}"
     log_f "IP_REDIRECT: ${IP_REDIRECT:=$(ip_addr)}"

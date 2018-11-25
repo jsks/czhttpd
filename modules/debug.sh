@@ -158,7 +158,7 @@ function debug_handler() {
             fi;;
         ('check_request')
             log_headers;;
-        ('__srv')
+        ('srv')
             srv_hook ${1:-$req_headers[url]};;
         ('send_file')
             dbg_add "sent $fsize"
