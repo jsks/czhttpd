@@ -63,6 +63,7 @@ HTTP_CODES=( 200    "Ok"
              400    "Bad Request"
              403    "Forbidden"
              404    "Not Found"
+             405    "Method Not Allowed"
              413    "Request Entity Too Large"
              500    "Internal Server Error"
              501    "Not Implemented"
@@ -681,6 +682,10 @@ function send() {
 ###
 # How to fulfill valid request (create directory listing or send a file etc etc)
 function handler() {
+    # We'll only allow POST for CGI scripts. If this function is being
+    # invoked we're either dealing with dir listing or a file.
+    [[ $req_headers[method] == "POST" ]] && error_headers 405
+
     if [[ -f $1 ]]; then
         local mtype
         local -a fsize

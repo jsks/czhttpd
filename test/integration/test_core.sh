@@ -62,6 +62,10 @@ describe "Nonexistent file/dir"
 check 127.0.0.1:$PORT/foo \
       --http_code 404
 
+describe "POST should only be accepted by cgi"
+check --method "POST" 127.0.0.1:$PORT/ \
+      --http_code 405
+
 describe "Test unknown method"
 check --method "PUT" 127.0.0.1:$PORT \
       --http_code 501
