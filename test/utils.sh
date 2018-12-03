@@ -22,6 +22,11 @@ function error() {
 function start_server() {
     setopt noerr_return
 
+    if [[ -f $SRC_DIR/.czhttpd-pid ]] &&
+           kill -0 $(<$SRC_DIR/.czhttpd-pid) 2>/dev/null; then
+        error "czhttpd already running?"
+    fi
+
     zsh -f $SRC_DIR/czhttpd -v -p $PORT -c $CONF $TESTROOT >&$debugfd &
     typeset +r -g PID=$!
     readonly -g PID
