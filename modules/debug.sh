@@ -13,8 +13,6 @@
 
 (( ! DEBUG )) && return
 
-#setopt warn_create_global
-
 ###
 # DBG_IN -> array[child pid] = bytes read
 # DBG_OUT -> array[child pid] = bytes sent
@@ -164,7 +162,7 @@ function debug_handler() {
         ('check_request')
             log_headers;;
         ('srv')
-            srv_hook ${1:-$req_headers[url]};;
+            srv_hook ${dbg_args:-$req_headers[url]};;
         ('send_file')
             dbg_add "sent $fsize"
             log_dbg "$dbg_cmd: $pathname";;
