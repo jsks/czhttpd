@@ -51,12 +51,14 @@ function send() {
 
         stat -A gzip_fsize -L +size $cache_file
 
-        return_header "200 Ok" "Content-type: ${mtype:-application:octet-stream}; charset=UTF-8" \
-                      "Content-Encoding: gzip" "Content-Length: $gzip_fsize"
+        return_headers 200 \
+                       "Content-type: ${mtype:-application:octet-stream}; charset=UTF-8" \
+                       "Content-Encoding: gzip" "Content-Length: $gzip_fsize"
         send_file $cache_file
     else
-        return_header "200 Ok" "Content-type: ${mtype:-application:octet-stream}; charset=UTF-8" \
-                      "Content-Encoding: gzip" "Transfer-Encoding: chunked"
+        return_headers 200 \
+                       "Content-type: ${mtype:-application:octet-stream}; charset=UTF-8" \
+                       "Content-Encoding: gzip" "Transfer-Encoding: chunked"
         gzip -$COMPRESS_LEVEL -c $1 | send_chunk
     fi
 

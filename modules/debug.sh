@@ -83,11 +83,11 @@ function log_headers() {
     log_dbg "request headers...\n${(pj.\n.)str}"
 }
 
-function return_header_hook() {
+function return_headers_hook() {
     local buf
     local -a headers response
 
-    buff="$(return_header $@)"
+    buff="$(return_headers $@)"
     for i in ${(f)buff}; do
         if [[ $i =~ [a-zA-Z0-9] ]]; then
             dbg_add "sent $(( ${#i} + 2 ))"
@@ -165,8 +165,8 @@ function debug_handler() {
             log_dbg "$dbg_cmd: $pathname";;
         ('send_chunk')
             log_dbg "$dbg_cmd: $pathname";;
-        ('return_header')
-            return_header_hook ${(eps.\".)dbg_args};;
+        ('return_headers')
+            return_headers_hook ${(eps.\".)dbg_args};;
     esac
 }
 

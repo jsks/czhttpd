@@ -424,7 +424,7 @@ function parse_request() {
     # closes in the middle of any other reads, send 400 and simply
     # suppress EPIPE.
     read -t $HTTP_TIMEOUT -r -u $fd line || {
-        [[ -n $line ]] && error_header 400
+        [[ -n $line ]] && error_headers 400
         return 1
     }
 
@@ -436,12 +436,12 @@ function parse_request() {
     done
 
     while :; do
-        read -t $HTTP_RECV_TIMEOUT -r -u $fd line || { error_header 400; return 1 }
+        read -t $HTTP_RECV_TIMEOUT -r -u $fd line || { error_headers 400; return 1 }
         [[ -z $line || $line == $'\r' ]] && break
 
         for key value in ${(s.: .)line%$'\r'}; do
             # Malformed request
-            [[ -z $key || -z $value ]] && { error_header 400; return 1 }
+            [[ -z $key || -z $value ]] && { error_headers 400; return 1 }
 
             req_headers[${(L)key}]="${=value}"
         done
@@ -460,7 +460,7 @@ function parse_req_body_chunked() {
 
     while :; do
         # Find our hexadecimal first
-        read -t $HTTP_RECV_TIMEOUT -r -u $fd line || { error_header 400; return 1 }
+        read -t $HTTP_RECV_TIMEOUT -r -u $fd line || { error_headers 400; return 1 }
         [[ -z ${line%$'\r'} ]] && continue
 
         # If 0 we're at the end
@@ -473,7 +473,7 @@ function parse_req_body_chunked() {
         # that many bytes so loop
         while :; do
             sysread -c count -t $HTTP_RECV_TIMEOUT -s $chunk_size -i $fd buff || {
-                error_header 400; return 1
+                error_headers 400; return 1
             }
 
             total+=$count
@@ -490,15 +490,14 @@ function parse_req_body_chunked() {
             (( ! (offset-=count) )) && break
         done
 
-        (( total > HTTP_BODY_SIZE )) && { error_header 413; return 1 }
+        (( total > HTTP_BODY_SIZE )) && { error_headers 413; return 1 }
         unset line
     done
 
-    error_header 400
+    error_headers 400
     return 1
 
 }
-
 
 function parse_req_body_fixed() {
     local buff
@@ -506,8 +505,8 @@ function parse_req_body_fixed() {
 
     local -i bufsize
 
-    [[ $req_headers[content-length] != <-> ]] && { error_header 400; return 1 }
-    (( req_headers[content-length] > HTTP_BODY_SIZE )) && { error_header 413; return 1 }
+    [[ $req_headers[content-length] != <-> ]] && { error_headers 400; return 1 }
+    (( req_headers[content-length] > HTTP_BODY_SIZE )) && { error_headers 413; return 1 }
 
     # Same; we can't guarantee that sysread will read $bufsize in one go.
     bufsize=$req_headers[content-length]
@@ -530,22 +529,24 @@ function parse_req_body_fixed() {
         (( ! (bufsize-=count) )) && break
     done
 
-    (( total != $req_headers[content-length] )) && { error_header 400; return 1 }
+    (( total != $req_headers[content-length] )) && { error_headers 400; return 1 }
 
     return 0
 }
 
 function check_request() {
-    if [[ -z $req_headers[url] || -z $req_headers[method] || -z $req_headers[version] ]]; then
-        error_header 400
+    if [[ -z $req_headers[url] ||
+              -z $req_headers[method] ||
+              -z $req_headers[version] ]]; then
+        error_headers 400
         return 1
     fi
 
     case $req_headers[version] in
         ($SERVER_PROTOCOL)
-            [[ -z $req_headers[host] ]] && { error_header 400; return 1 };;
+            [[ -z $req_headers[host] ]] && { error_headers 400; return 1 };;
         (*)
-            error_header 505
+            error_headers 505
             return 1;;
     esac
 
@@ -553,17 +554,22 @@ function check_request() {
         ("HEAD"|"GET"|"POST")
             return 0;;
         (*)
-            error_header 501
+            error_headers 501
             return 1;;
     esac
 }
 
-function return_header() {
+function return_headers() {
+    if [[ -z $HTTP_CODES[$1] ]]; then
+        log_err "Could not find status code $1"
+        return 1
+    fi
+
     local i cur_time resp_headers
     local -x TZ=UTC
     get_time
 
-    resp_headers+="$SERVER_PROTOCOL $1\r\n"
+    resp_headers="$SERVER_PROTOCOL $1 $HTTP_CODES[$1]\r\n"
 
     if (( HTTP_KEEP_ALIVE )); then
         resp_headers+="Connection: ${req_headers[connection]:-keep-alive}\r\n"
@@ -580,17 +586,13 @@ function return_header() {
     print -n "$resp_headers\r\n" 2>/dev/null
 }
 
-function error_header() {
-    if [[ -n $HTTP_CODES[$1] ]]; then
-        return_header "$1 $HTTP_CODES[$1]" "Content-type: text/plain; charset=UTF-8" "Content-length: $(( ${#1} + ${#HTTP_CODES[$1]} + 1))" $@[2,-1]
+function error_headers() {
+    return_headers $1 "Content-type: text/plain; charset=UTF-8" \
+                  "Content-length: $(( ${#1} + ${#HTTP_CODES[$1]} + 1))" $@[2,-1]
 
-        # Suppress EPIPE here too.
-        print -n "$1 $HTTP_CODES[$1]" 2>/dev/null
-        log_f "$1 $HTTP_CODES[$1]"
-    else
-        log_err "Could not find status code $1"
-        return 1
-    fi
+    # Suppress EPIPE here too.
+    print -n "$1 $HTTP_CODES[$1]" 2>/dev/null
+    log_f "$1 $HTTP_CODES[$1]"
 }
 
 ### Dir listing functions
@@ -660,18 +662,20 @@ function send_chunk() {
     fi
 }
 
-### Wrapper functions
-# Determines whether to send stream/file in chunks or as whole
+# Wrapper function which determines whether to send stream/file in
+# chunks or as whole
 function send() {
     if [[ -n $1 ]]; then
-        return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Content-Length: $fsize"
+        return_headers 200 "Content-type: $mtype; charset=UTF-8" \
+                      "Content-Length: $fsize"
         send_file $1
     else
-        return_header "200 Ok" "Content-type: $mtype; charset=UTF-8" "Transfer-Encoding: chunked"
+        return_headers 200 "Content-type: $mtype; charset=UTF-8" \
+                      "Transfer-Encoding: chunked"
         send_chunk
     fi
 
-    log_f "200"
+    log_f 200
 }
 
 ###
@@ -710,26 +714,26 @@ function srv() {
     urldecode ${1:-$req_headers[url]}
     pathname="${DOCROOT}$decoded_url"
 
-    [[ $HIDDEN_FILES != 1 && ${pathname:t} == .* ]] && { error_header 403; return }
-    [[ $FOLLOW_SYMLINKS != 1 && -h ${pathname%/} ]] && { error_header 403; return }
+    [[ $HIDDEN_FILES != 1 && ${pathname:t} == .* ]] && { error_headers 403; return }
+    [[ $FOLLOW_SYMLINKS != 1 && -h ${pathname%/} ]] && { error_headers 403; return }
 
     { if [[ -f ${pathname%/} ]]; then
           handler ${pathname:A}
       elif [[ -d $pathname ]]; then
           if [[ $pathname != $DOCROOT && $pathname[-1] != "/" ]]; then
-              error_header 301 "Location: http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
+              error_headers 301 "Location: http://$SERVER_ADDR:$PORT${pathname#$DOCROOT}/"
           elif [[ -f $pathname/$INDEX_FILE ]]; then
               handler $pathname/$INDEX_FILE
           else
               if [[ -r "$pathname" && -x "$pathname" ]]; then
                   handler "$pathname"
               else
-                  error_header 403
+                  error_headers 403
               fi
           fi
       else
-          error_header 404
-      fi } always { [[ $? != 0 ]] && error_header 500 }
+          error_headers 404
+      fi } always { [[ $? != 0 ]] && error_headers 500 }
 }
 
 ### Misc
@@ -826,7 +830,7 @@ while :; do
     parse_ztcp
 
     if (( ${#jobstates} >= MAX_CONN )); then
-        error_header 503 >&$fd
+        error_headers 503 >&$fd
         ztcp -c $fd
         continue
     fi

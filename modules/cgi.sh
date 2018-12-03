@@ -57,9 +57,24 @@ function exec_cgi() {
     local -a cgi_head cgi_body
     local cmd pid cgi_status_code
 
-    local -x CONTENT_LENGTH="${req_headers[content-length]:-NULL}" CONTENT_TYPE="$req_headers[content-type]" GATEWAY_INTERFACE="$GATEWAY_INTERFACE" QUERY_STRING="${req_headers[querystr]#\?}" REMOTE_ADDR="$client_ip" REMOTE_HOST="NULL" REQUEST_METHOD="$req_headers[method]" SCRIPT_NAME="${1#$DOCROOT}" SERVER_NAME="$SERVER_NAME" SERVER_ADDR="$SERVER_ADDR" SERVER_PORT="$PORT" SERVER_PROTOCOL="$SERVER_PROTOCOL" SERVER_SOFTWARE="$SERVER_SOFTWARE"
+    local -x CONTENT_LENGTH="${req_headers[content-length]:-NULL}" \
+             CONTENT_TYPE="$req_headers[content-type]" \
+             GATEWAY_INTERFACE="$GATEWAY_INTERFACE" \
+             QUERY_STRING="${req_headers[querystr]#\?}" \
+             REMOTE_ADDR="$client_ip" \
+             REMOTE_HOST="NULL" \
+             REQUEST_METHOD="$req_headers[method]" \
+             SCRIPT_NAME="${1#$DOCROOT}" \
+             SERVER_NAME="$SERVER_NAME" \
+             SERVER_ADDR="$SERVER_ADDR" \
+             SERVER_PORT="$PORT" \
+             SERVER_PROTOCOL="$SERVER_PROTOCOL" \
+             SERVER_SOFTWARE="$SERVER_SOFTWARE"
 
-    local -x DOCUMENT_ROOT="$DOCROOT" REQUEST_URI="$req_headers[url]$req_headers[querystr]" SCRIPT_FILENAME="$1" REDIRECT_STATUS=1
+    local -x DOCUMENT_ROOT="$DOCROOT" \
+             REQUEST_URI="$req_headers[url]$req_headers[querystr]" \
+             SCRIPT_FILENAME="$1" \
+             REDIRECT_STATUS=1
 
     for i in ${(k)req_headers}; do
         case $i in
@@ -79,8 +94,8 @@ function exec_cgi() {
     pid=$!
 
     if ! wait $pid; then
-        log_err "executing cgi script $1 failed"
-        error_header 500
+        log_err "Executing cgi script $1 failed"
+        error_headers 500
         return
     fi
 
@@ -96,11 +111,13 @@ function exec_cgi() {
         log_err "cgi script $1 failed to return a mime-type"
         # TODO: Handle this signal
         kill $pid 2>/dev/null
-        error_header 500
+        error_headers 500
         return
     fi
 
-    log_f ${cgi_status_code:-"200"}
-    return_header "${cgi_status_code:-200 Ok}" "Transfer-Encoding: chunked" ${cgi_head[@]}
+    log_f ${cgi_status_code:-200}
+    return_headers ${cgi_status_code:-200} "Transfer-Encoding: chunked" \
+                   ${cgi_head[@]}
+
     send_chunk <&p
 }
