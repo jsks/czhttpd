@@ -41,6 +41,11 @@ check 127.0.0.1:$PORT/dir/ \
       --http_code 200 \
       --header_compare 'Transfer-Encoding: chunked'
 
+describe "HEAD should not send anything"
+check --method "HEAD" 127.0.0.1:$PORT/file.txt \
+      --http_code 200 \
+      --size_download 0
+
 # Let's go up the chain of http error codes
 describe "Redirection"
 check 127.0.0.1:$PORT/dir \
