@@ -8,6 +8,7 @@ if [[ -t 1 ]] && (( $terminfo[colors] >= 8 )); then
     colors
 fi
 
+zmodload zsh/datetime
 zmodload zsh/pcre
 zmodload zsh/stat
 zmodload zsh/system
@@ -52,6 +53,10 @@ function md5hash () {
     else
         md5 -q $1
     fi
+}
+
+function unixtime() {
+    strftime "%a, %d %b %Y %H:%M:%S GMT" ${1:-$EPOCHSECONDS}
 }
 
 function help() {

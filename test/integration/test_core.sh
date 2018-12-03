@@ -74,7 +74,28 @@ describe "HTTP/1.0 request"
 check --http 1.0 127.0.0.1:$PORT \
       --http_code 505
 
-# Finally, let's check that our headers are being set properly
+# What about if-modified-since and if-unmodified-since
+describe "Request unmodified file"
+check --header "If-Modified-Since: $(unixtime)" 127.0.0.1:$PORT/file.txt \
+      --http_code 304
+
+describe "Request modified file"
+check --header "If-Modified-Since: $(unixtime 20)" 127.0.0.1:$PORT/file.txt \
+      --http_code 200
+
+describe "Send if unmodified"
+check --header "If-Unmodified-Since: $(unixtime)" 127.0.0.1:$PORT/file.txt \
+      --http_code 200
+
+describe "412 file modified"
+check --header "If-Unmodified-Since: $(unixtime 40000)" 127.0.0.1:$PORT/file.txt \
+      --http_code 412
+
+describe "Invalid time for if-modified-since"
+check --header "If-Modified-Since: $(date)" 127.0.0.1:$PORT/file.txt \
+      --http_code 200
+
+# Finally, check that our headers are being set properly
 describe "Client Connection: close"
 check --header 'Connection: close' 127.0.0.1:$PORT \
       --http_code 200 \

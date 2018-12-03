@@ -60,10 +60,12 @@ integer logfd
 
 HTTP_CODES=( 200    "Ok"
              301    "Moved Permanently"
+             304    "Not Modified"
              400    "Bad Request"
              403    "Forbidden"
              404    "Not Found"
              405    "Method Not Allowed"
+             412    "Precondition Failed"
              413    "Request Entity Too Large"
              500    "Internal Server Error"
              501    "Not Implemented"
@@ -365,14 +367,20 @@ function rmlock() {
     fi
 }
 
-###
 # Formatted last modification time for file
 #   @Sets array -> mtime
 function mod_time() {
     stat -A mtime -L -F "%d-%b-%Y %T" +mtime $1 2>/dev/null || print "\-"
 }
 
-###
+function unixmod_time() {
+    stat -A local_mtime +mtime $1
+}
+
+function parse_datestr() {
+    strftime -s unixtime -r "%a, %d %b %Y %H:%M:%S %Z" $1
+}
+
 # Decode url
 #   @Sets var -> decoded_url
 function urldecode() {
@@ -687,11 +695,31 @@ function handler() {
     [[ $req_headers[method] == "POST" ]] && error_headers 405
 
     if [[ -f $1 ]]; then
-        local mtype
+        local mtype unixtime local_mtime
         local -a fsize
 
         [[ -z $mtype ]] && mime_type $1
         [[ -z $fsize ]] && stat -A fsize -L +size $1
+
+        if [[ -n $req_headers[if-modified-since] ]] && \
+               parse_datestr $req_headers[if-modified-since]; then
+            unixmod_time $1
+
+            if (( local_mtime > unixtime )); then
+                send $1
+            else
+                return_headers 304
+            fi
+        elif [[ -n $req_headers[if-unmodified-since] ]] && \
+                 parse_datestr $req_headers[if-unmodified-since]; then
+            unixmod_time $1
+
+            if (( local_mtime <= unixtime )); then
+                send $1
+            else
+                return_headers 412
+            fi
+        fi
 
         send $1
     else
