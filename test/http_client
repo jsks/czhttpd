@@ -238,17 +238,20 @@ function chttp::read_body() {
 
         bufsize=$CHTTP_RESP_HEADERS[content-length]
         while :; do
-            sysread -o $__outfd -t $__RECV_TIMEOUT -i $__fd -s $bufsize -c count
+            sysread -o $__outfd -t $__RECV_TIMEOUT -i $__fd -s $bufsize -c count || {
+                break
+            }
+
             CHTTP_DOWNLOAD_SIZE+=$count
 
             (( ! (bufsize-=count) )) && break
         done
 
-        (( CHTTP_DOWNLOAD_SIZE != CHTTP_RESP_HEADERS[content-length] )) && return 1
+#        (( CHTTP_DOWNLOAD_SIZE != CHTTP_RESP_HEADERS[content-length] )) && return 1
     elif [[ $CHTTP_RESP_HEADERS[transfer-encoding] == "chunked" ]]; then
         while :; do
             offset=2
-            read -t $__RECV_TIMEOUT -r -u $__fd line
+            read -t $__RECV_TIMEOUT -r -u $__fd line || break
             [[ -z ${line%$'\r'} ]] && continue
 
             [[ ${line%$'\r'} == 0 ]] && { return 0 }
