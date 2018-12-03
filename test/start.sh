@@ -14,7 +14,7 @@ typeset -g CONF="./_cz_test.conf"
 if [[ $1 == "--full-debug" ]]; then
 <<EOF > $CONF
 typeset -ga DEBUG_TRACE_FUNCS
-DEBUG_TRACEFUNCS=(parse_request srv)
+DEBUG_TRACE_FUNCS=(parse_request srv)
 EOF
 fi
 
