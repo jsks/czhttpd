@@ -87,7 +87,12 @@ function return_headers_hook() {
     local buf
     local -a headers response
 
-    buff="$(return_headers $@)"
+    # There's an extra space that needs to be stripped, otherwise
+    # czhttpd will complain about not finding the status code in the
+    # global assoc array
+    status_code=${@[1]%% }
+
+    buff="$(return_headers $status_code ${@[2,-1]})"
     for i in ${(f)buff}; do
         if [[ $i =~ [a-zA-Z0-9] ]]; then
             dbg_add "sent $(( ${#i} + 2 ))"
