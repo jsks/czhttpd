@@ -119,7 +119,7 @@ function chttp::connect() {
         ztcp $__HOST $__PORT 2>/dev/null
         stop=$EPOCHREALTIME
 
-        if [[ -n $REPLY ]] ; then
+        if [[ -n $REPLY ]]; then
             __fd=$REPLY
             CHTTP_TIMES[connect]="$start,$stop"
             return
@@ -150,7 +150,8 @@ function chttp::send_request() {
     start=$EPOCHREALTIME
 
     for i  in $__ADD_HEADERS; do
-        [[ $i != "--header" ]] && __REQ_HEADERS[${(L)i[(ws.:.)1]}]="${i[(ws.:.)2]}"
+        [[ $i != "--header" ]] && \
+            __REQ_HEADERS[${(L)i[(ws.:.)1]}]="${i/#*:[[:space:]]##/}"
     done
 
     if [[ -n $__REQ_DATA ]]; then
