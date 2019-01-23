@@ -96,18 +96,26 @@ function get_http() {
 #               --header_compare
 #               --http_code
 #               --size_download
+#               --fail
 #   Everything else gets sent as args to `get_http`
 function check() {
     local -A opts
     local -a assert_strs
-    local output i
+    local output i req_rv
 
     (( STATS[count]++ )) || :
 
-    zparseopts -E -D -A opts -file_compare: -header_compare: -size_download: -http_code:
+    zparseopts -E -D -A opts -file_compare: -header_compare: -size_download: \
+               -http_code: -fail
 
     output="$TESTTMP/${@[-1]:t}.output"
-    get_http --output $output $*
+    get_http --output $output $* || req_rv=$?
+
+    # If we don't explicitly want http_client to fail, error out
+    # here. Really should provide better error messages...
+    if [[ ${+opts[--fail]} == 0 && ${req_rv:-0} != 0 ]]; then
+        error "Error connecting to server"
+    fi
 
     # Add to global arrays to keep track of timings for final stats
     CONNECT_TIMES+=$(chttp::calc_time connect)
@@ -126,6 +134,8 @@ function check() {
                 assert $i $opts[$i] $CHTTP_DOWNLOAD_SIZE;;
             ("--http_code")
                 assert $i $opts[$i] ${CHTTP_RESP_HEADERS[status_line][(w)2]};;
+            ("--fail")
+                assert $i '[^0]' ${req_rv:-0};;
         esac
     done
 

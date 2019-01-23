@@ -1,18 +1,21 @@
-#!/bin/zsh
+#!/usr/bin/env zsh
+#
 # http_client - simple http client written in zsh
 # author: @jsks
 #
 # Can be used either as a zsh library or standalone script
 # $ ./http_client --help
 #
-# As a sourced script, functions are given the 'chttp::' prefix and "public"
-# global variables the prefix 'CHTTP_' to avoid namespace conflicts.
+# As a sourced script, functions are given the 'chttp::' prefix and
+# "public" global variables the prefix 'CHTTP_' to avoid namespace
+# conflicts.
 #
 #   Library Functions:
 #       chttp::parse_args
 #       chttp::connect
 #       chttp::send_request
 #       chttp::read_response
+#
 #   Global Vars:
 #       CHTTP_RESP_HEADERS
 #       CHTTP_TIMES
@@ -285,7 +288,12 @@ function chttp::print_headers() {
 }
 
 function chttp::calc_time() {
-    print $(( (${CHTTP_TIMES[$1][(ws.,.)2]} - ${CHTTP_TIMES[$1][(ws.,.)1]}) * 1000 ))
+    if [[ -n $CHTTP_TIMES[$1] ]]; then
+        print $(( (${CHTTP_TIMES[$1][(ws.,.)2]} - ${CHTTP_TIMES[$1][(ws.,.)1]}) \
+                      * 1000 ))
+    else
+        print 0
+    fi
 }
 
 function chttp::print_times() {
@@ -295,7 +303,10 @@ function chttp::print_times() {
         if [[ $i != "total" ]]; then
             printf "Time to $i: %.3fs\n" $(chttp::calc_time $i) >&$__verbosefd
         else
-            printf "Total time: %.3fs\n" $(( $(chttp::calc_time connect) + $(chttp::calc_time send) + $(chttp::calc_time download) )) >&$__verbosefd
+            printf "Total time: %.3fs\n" $(( $(chttp::calc_time connect) + \
+                                             $(chttp::calc_time send) + \
+                                             $(chttp::calc_time download) )) \
+                   >&$__verbosefd
         fi
     done
 }
