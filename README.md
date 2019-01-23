@@ -18,7 +18,9 @@ the current directory.
 ```
 
 ### Dependencies
-`>=zsh-5.6`. If available, `file` is also used for fallback mime-type support.
+`>=zsh-5.6`. If available, `file` is used for fallback mime-type support. macOS/*BSD also rely on `ifconfig` when `IP_REDIRECT` is not set.
+
+Additionally, to run the full test suite the following external commands are required: `git`, `awk`, `md5sum`/`md5`, `vegeta`.
 
 ### Features
 - Basic support for `HTTP/1.1` (methods limited to `HEAD`, `GET`, `POST`)
@@ -30,6 +32,7 @@ the current directory.
     - Gzip compression
     - Basic CGI/1.1 support
         - phpMyAdmin appears fully functional, and partially Wordpress (requires configuring for an alternative port)
+    - IP filtering
     - Basic url rewrite
 
 ### Configuration
