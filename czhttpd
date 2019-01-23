@@ -58,19 +58,19 @@ typeset -a conn_list
 
 integer logfd
 
-HTTP_CODES=( 200    "Ok"
-             301    "Moved Permanently"
-             304    "Not Modified"
-             400    "Bad Request"
-             403    "Forbidden"
-             404    "Not Found"
-             405    "Method Not Allowed"
-             412    "Precondition Failed"
-             413    "Request Entity Too Large"
-             500    "Internal Server Error"
-             501    "Not Implemented"
-             503    "Service Unavailable"
-             505    "HTTP Version Not Supported" )
+readonly HTTP_CODES=( 200    "Ok"
+                      301    "Moved Permanently"
+                      304    "Not Modified"
+                      400    "Bad Request"
+                      403    "Forbidden"
+                      404    "Not Found"
+                      405    "Method Not Allowed"
+                      412    "Precondition Failed"
+                      413    "Request Entity Too Large"
+                      500    "Internal Server Error"
+                      501    "Not Implemented"
+                      503    "Service Unavailable"
+                      505    "HTTP Version Not Supported" )
 
 readonly HTTP_CODES ARGV="$*"
 
@@ -108,6 +108,7 @@ function ip_addr() {
     esac
 }
 
+### Function renaming
 # This is crude, but we want modules to be able to transparently
 # override main functions. Previously, we prefixed the main functions
 # in czhttpd with '__' and defined a wrapper function which executed
@@ -115,7 +116,7 @@ function ip_addr() {
 # 'compress.sh').
 #
 # This way we don't have to modify the main source code for each
-# module and simply dynamically rename the functions we want to
+# module and can simply dynamically rename the functions we want to
 # override with the caveat that obviously two modules can't override
 # the same function, but that was already a prior restriction.
 #
@@ -164,14 +165,10 @@ function log_f() {
 }
 
 function log_err() {
-    local cur_time
-
-    check_logfd
-    get_time
-
-    print -u $logfd "${(e@)LOG_FORMAT} Error -> $*"
+    log_f "Error -> $*"
 }
 
+# Used to log stderr from child processes
 function capture_stderr() {
     local pid buf
 
@@ -274,14 +271,13 @@ function parse_args() {
 }
 
 ### Utility functions
-# Dear reader, I apologize in advance for this, but all of these utility
-# functions modify scoped variables rather than return (`print`) values.
-# Subshells are expensive and we care about latency, remember to declare vars in
-# calling f().
-
-###
+# Dear reader, I apologize in advance for this, but all of these
+# utility functions modify scoped variables rather than return
+# (`print`) values.  Subshells are expensive and we care about
+# latency, remember to declare vars in calling f().
+#
 # Calculate size of file in appropriate units.
-#   @Sets var -> `fsize`
+#   @Sets `fsize`
 function calc_size() {
     [[ -d "$1" ]] && { fsize="-"; return }
     local -F KB MB GB
@@ -300,16 +296,14 @@ function calc_size() {
     (( stat_size > GB )) && { ((stat_size/=GB)); fsize="${stat_size}G"; return }
 }
 
-###
 # Formatted time string
-#   @Sets var -> `cur_time`
+#   @Sets `cur_time`
 function get_time() {
     strftime -s cur_time "%a %d %b, %H:%M:%S" $EPOCHSECONDS
 }
 
-###
-# Mime type according to first, our global mtype array, and second `file`
-#   @Sets var -> `mtype`
+# Mime type according to first our global mtype array, and then `file`
+#   @Sets `mtype`
 function mime_type() {
     [[ -h "${1%/}" ]] && mtype="symbolic link->"
 
@@ -338,12 +332,12 @@ function mime_type() {
     fi
 }
 
-###
 # Lock using mkdir
-#   @Sets var -> LOCK
+#   @Sets `LOCK`
 #
 #   Note:
-#       - We can't use `zsystem flock` since child shells won't respect lock
+#       - We can't use `zsystem flock` since sibling shells won't
+#         respect lock
 #       - LOCK will be declared global so that all f()s have access
 function mklock() {
     typeset -g LOCK=${1}.lock
@@ -358,31 +352,34 @@ function mklock() {
     return 0
 }
 
-###
+# Formatted last modification time for file
+#   @Sets `mtime`
+function mod_time() {
+    stat -A mtime -L -F "%d-%b-%Y %T" +mtime $1 2>/dev/null || print "\-"
+}
+
+# Parse If-Modified-Since/If-Unmodified-Since date string
+#   @Sets `unixtime`
+function parse_datestr() {
+    strftime -s unixtime -r "%a, %d %b %Y %H:%M:%S %Z" $1
+}
+
 # Unlock using rmdir
-#   @Unsets var -> LOCK
+#   @Unsets `LOCK`
 function rmlock() {
     if [[ -n $LOCK ]]; then
         rmdir $LOCK; unset LOCK
     fi
 }
 
-# Formatted last modification time for file
-#   @Sets array -> mtime
-function mod_time() {
-    stat -A mtime -L -F "%d-%b-%Y %T" +mtime $1 2>/dev/null || print "\-"
-}
-
+# Modification time for file in seconds since unix epoch
+#   @Sets `local_mtime`
 function unixmod_time() {
     stat -A local_mtime +mtime $1
 }
 
-function parse_datestr() {
-    strftime -s unixtime -r "%a, %d %b %Y %H:%M:%S %Z" $1
-}
-
 # Decode url
-#   @Sets var -> decoded_url
+#   @Sets `decoded_url`
 function urldecode() {
     printf -v decoded_url '%b' "${1:gs/%/\\x}"
 }
@@ -413,10 +410,11 @@ function parse_ztcp() {
     done
 }
 
-###
-# Would be marginally quicker to use sysread + we would have better return
-# values, but that would also add an insane amount of complexity (esp. wrt
-# pipelining).
+# Parse client requests
+#
+# Would be marginally quicker to use sysread + we would have better
+# return values, but that would also add an insane amount of
+# complexity (esp. wrt pipelining).
 #
 # Ex: One of our shortcomings now is that we don't know why read may
 # fail, so we can't return a 408 on timeout. Instead we just
@@ -517,7 +515,8 @@ function parse_req_body_fixed() {
     [[ $req_headers[content-length] != <-> ]] && { error_headers 400; return 1 }
     (( req_headers[content-length] > HTTP_BODY_SIZE )) && { error_headers 413; return 1 }
 
-    # Same; we can't guarantee that sysread will read $bufsize in one go.
+    # Same as parsing chunked body, we can't guarantee that sysread
+    # will read $bufsize in one go.
     bufsize=$req_headers[content-length]
     while :; do
 
@@ -605,8 +604,9 @@ function error_headers() {
 }
 
 ### Dir listing functions
-# Iterate through directory and add each file/subdir to shared str (quicker than
-# redirecting `print` statements; also faster than shared array)
+# Iterate through directory and add each file/subdir to shared str
+# (quicker than redirecting `print` statements; also faster than
+# shared array)
 function build_index() {
     local i index
 
@@ -618,6 +618,7 @@ function build_index() {
         for i in .*(-/NrT) .*(-.Nr); html_fragment "$i"
     fi
 
+    # Always list directories first
     for i in *(-/NrT) *(-.Nr); html_fragment "$i"
 
     cd -
@@ -671,8 +672,8 @@ function send_chunk() {
     fi
 }
 
-# Wrapper function which determines whether to send stream/file in
-# chunks or as whole
+# Wrapper function which determines whether to send resource as chunks
+# or as whole
 function send() {
     if [[ -n $1 ]]; then
         return_headers 200 "Content-type: $mtype; charset=UTF-8" \
@@ -775,9 +776,9 @@ function cleanup() {
 
     kill -15 ${(SM)jobstates##<->} 2>/dev/null
 
-    log_f "> Exiting main"
     rm -rf $CACHE_DIR
     ztcp -c
+    log_f "> Exiting main"
 }
 
 ###
@@ -789,12 +790,12 @@ function TRAPHUP() {
 ### Main
 # Declare our default config vars in a function so that we can later reload
 function cz_init() {
-    LOG_FORMAT=(  '[$cur_time]'
-                  '[pid: ${pid:-$sysparams[pid]}]'
-                  '$client_ip'
-                  '$req_headers[method]'
-                  '$req_headers[url]'
-                  '$req_headers[version]' )
+    LOG_FORMAT=( '[$cur_time]'
+                 '[pid: ${pid:-$sysparams[pid]}]'
+                 '$client_ip'
+                 '$req_headers[method]'
+                 '$req_headers[url]'
+                 '$req_headers[version]' )
 
     parse_args ${=ARGV}
     parse_conf $CONFIG
@@ -869,7 +870,7 @@ while :; do
     fi
 
     (trap "ztcp -c; rmlock 2>/dev/null; exit" INT TERM KILL EXIT
-     trap '' PIPE; trap - CHLD HUP
+     trap '' PIPE
 
      setopt err_return
 
