@@ -58,19 +58,19 @@ typeset -a conn_list
 
 integer logfd
 
-readonly HTTP_CODES=( 200    "Ok"
-                      301    "Moved Permanently"
-                      304    "Not Modified"
-                      400    "Bad Request"
-                      403    "Forbidden"
-                      404    "Not Found"
-                      405    "Method Not Allowed"
-                      412    "Precondition Failed"
-                      413    "Request Entity Too Large"
-                      500    "Internal Server Error"
-                      501    "Not Implemented"
-                      503    "Service Unavailable"
-                      505    "HTTP Version Not Supported" )
+HTTP_CODES=( 200    "Ok"
+             301    "Moved Permanently"
+             304    "Not Modified"
+             400    "Bad Request"
+             403    "Forbidden"
+             404    "Not Found"
+             405    "Method Not Allowed"
+             412    "Precondition Failed"
+             413    "Request Entity Too Large"
+             500    "Internal Server Error"
+             501    "Not Implemented"
+             503    "Service Unavailable"
+             505    "HTTP Version Not Supported" )
 
 readonly HTTP_CODES ARGV="$*"
 
