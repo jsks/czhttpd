@@ -748,8 +748,17 @@ function srv() {
     urldecode ${1:-$req_headers[url]}
     pathname="${DOCROOT}$decoded_url"
 
-    [[ $HIDDEN_FILES != 1 && ${pathname:t} == .* ]] && { error_headers 403; return }
-    [[ $FOLLOW_SYMLINKS != 1 && -h ${pathname%/} ]] && { error_headers 403; return }
+    if [[ $HIDDEN_FILES != 1 && ${pathname:t} == .* ]]; then
+        log_f "Requested resource dot file/directory when HIDDEN_FILES disabled"
+        error_headers 403
+        return
+    fi
+
+    if [[ $FOLLOW_SYMLINKS != 1 && -h ${pathname%/} ]]; then
+        log_f "Requested resource symlink when FOLLOW_SYMLINKS disabled"
+        error_headers 403
+        return
+    fi
 
     { if [[ -f ${pathname%/} ]]; then
           handler ${pathname:A}
