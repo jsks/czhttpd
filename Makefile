@@ -13,7 +13,7 @@ reload:
 	@kill -0 $(PID) && kill -HUP $(PID)
 
 test:
-	@zsh -f test/integration/test.sh -l test.log
+	@zsh -f test/integration/test.sh -l test.log $(CLI_ARGS)
 
 stress:
-	@zsh -f test/stress/stress.sh -l stress.log
+	@zsh -f test/stress/stress.sh -l stress.log $(CLI_ARGS)
