@@ -2,6 +2,10 @@
 # `$IP_ACCEPT`.
 ###
 
+# Declare module defaults
+typeset -gi IP_MATCH
+typeset -g IP_ACCEPT
+
 : ${IP_MATCH:=0}
 : ${IP_ACCEPT:=.*}
 

@@ -1,7 +1,11 @@
 # Module to compress server output using gzip
 ###
 
+
 # Declare our module defaults
+typeset -gi COMPRESS COMPRESS_LEVEL COMPRESS_MIN_SIZE COMPRESS_CACHE
+typeset -g COMPRESS_TYPES COMPRESS_CACHE_DIR
+
 : ${COMPRESS:=0}
 : ${COMPRESS_TYPES:="text/html,text/css,text/javascript"}
 : ${COMPRESS_LEVEL:=6}
@@ -14,22 +18,15 @@ if [[ $COMPRESS != [01] ]]; then
     return 1
 fi
 
-if [[ $COMPRESS_LEVEL != <-> ]]; then
-    log_err "Invalid integer for COMPRESS_LEVEL"
-    return 1
-fi
-
-if [[ $COMPRESS_MIN_SIZE != <-> ]]; then
-    log_err "Invalid integer for COMPRESS_MIN_SIZE"
-    return 1
-fi
-
 if [[ $COMPRESS_CACHE != [01] ]]; then
     log_err "Invalid integer for COMPRESS_CACHE"
     return 1
 fi
 
-(( COMPRESS_CACHE )) && [[ ! -d $COMPRESS_CACHE_DIR ]] && mkdir $COMPRESS_CACHE_DIR
+if (( COMPRESS_CACHE )) && [[ ! -d $COMPRESS_CACHE_DIR ]]; then
+    mkdir $COMPRESS_CACHE_DIR
+fi
+
 typeset -ga COMPRESS_TYPES_ARRAY=(${(s.,.)COMPRESS_TYPES})
 
 rename_fn send cz::send
@@ -66,11 +63,12 @@ function send() {
 }
 
 function check_if_compression() {
-    (( ! COMPRESS )) || [[ -z ${(SM)req_headers[accept-encoding]#gzip} ]] && return 1
+    if (( ! COMPRESS )) || [[ -z ${(SM)req_headers[accept-encoding]#gzip} ]]; then
+        return 1
+    fi
 
-    if [[ -n $1 ]]; then
-        (( fsize < COMPRESS_MIN_SIZE )) ||
-            [[ -z ${(SM)req_headers[accept-encoding]#gzip} ]] && return 1
+    if [[ -n $1 ]] && (( fsize < COMPRESS_MIN_SIZE )); then
+        return 1
     fi
 
     return 0

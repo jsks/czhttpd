@@ -8,12 +8,19 @@
 ###
 
 # Declare our default variables
+typeset -gi CGI_ENABLE CGI_TIMEOUT
+typeset -g CGI_EXTS
+
 : ${CGI_ENABLE:=0}
 : ${CGI_EXTS:="php"}
 : ${CGI_TIMEOUT=300}
 
-rename_fn handler cz::handler
+if [[ $CGI_ENABLE != [01] ]]; then
+    log_err "Invalid integer for CGI_ENABLE"
+    return 1
+fi
 
+rename_fn handler cz::handler
 readonly GATEWAY_INTERFACE="CGI/1.1"
 
 function timeout() {

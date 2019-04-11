@@ -5,9 +5,10 @@ typeset -ga DEBUG_TRACE_FUNCS
 DEBUG_TRACE_FUNCS=($TRACE_FUNCS)
 source $SRC_DIR/modules/debug.sh
 
-URL_REWRITE=0
-CGI_ENABLE=0
-COMPRESS=0
+typeset -g URL_REWRITE=0
+typeset -g CGI_ENABLE=0
+typeset -g COMPRESS=0
+typeset -g IP_MATCH=0
 
 typeset -gA URL_PATTERNS
 URL_PATTERNS=( "/file.txt" "/.dot.txt" )
@@ -208,7 +209,6 @@ source $SRC_DIR/modules/debug.sh
 URL_REWRITE=0
 COMPRESS=0
 CGI_ENABLE=0
-
 IP_MATCH=1
 
 source $SRC_DIR/modules/ip_match.sh

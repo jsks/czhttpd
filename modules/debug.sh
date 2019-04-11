@@ -10,8 +10,10 @@
 #####
 
 : ${DEBUG:=0}
-
 (( ! DEBUG )) && return
+
+# Enable warnings for implicit global variable declarations
+setopt warn_create_global
 
 ###
 # DBG_IN -> array[child pid] = bytes read
