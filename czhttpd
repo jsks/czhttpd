@@ -27,7 +27,7 @@ done
 export PATH=/sbin:/bin:/usr/bin:/usr/local/bin
 
 # Load Modules
-ml=(datetime files parameter stat system net/tcp zutil)
+ml=(datetime files parameter param/private stat system net/tcp zutil)
 for i in $ml; zmodload zsh/$i || exit 127
 
 ### zsh options
@@ -78,8 +78,8 @@ readonly HTTP_CODES ARGV="$*"
 function ip_addr() {
     case $OSTYPE in
         (linux*)
-            local -a tcp_list ip
-            local i k v
+            private -a tcp_list ip
+            private i k v
 
             tcp_list=("${(f@)$(</proc/net/tcp)}")
 
@@ -95,7 +95,7 @@ function ip_addr() {
 
             printf "%d.%d.%d.%d\n" ${(Oa)ip[@]};;
         (darwin*|*bsd*)
-            local line
+            private line
 
             while read line; do
                 if [[ ${line[(w)1]} == "inet"  && ${line[(w)2]} != "127.0.0.1" ]]; then
@@ -127,7 +127,7 @@ function rename_fn() {
     # want to rename and lose the old fn definition.
     [[ ${+functions[$2]} == 1 ]] && return
 
-    local f=$(typeset -f $1)
+    private f=$(typeset -f $1)
     eval "$2 ${f[(w)2,-1]}"
 }
 
@@ -170,7 +170,7 @@ function log_err() {
 
 # Used to log stderr from child processes
 function capture_stderr() {
-    local pid buf
+    private pid buf
 
     pid=$sysparams[ppid]
     sysread buf
@@ -240,7 +240,7 @@ function parse_conf() {
 
 function parse_args() {
     local -A opts
-    local i
+    private i
 
     zparseopts -D -A opts c: p: h v || error "Failed to parse arguments" 2>/dev/null
 
@@ -280,7 +280,7 @@ function parse_args() {
 #   @Sets `fsize`
 function calc_size() {
     [[ -d "$1" ]] && { fsize="-"; return }
-    local -F KB MB GB
+    private -F KB MB GB
     local -a stat_size
 
     KB=1024.0
@@ -306,10 +306,9 @@ function get_time() {
 #   @Sets `mtype`
 function mime_type() {
     [[ -h "${1%/}" ]] && mtype="symbolic link->"
-
     [[ -d "$1" ]] && { mtype+="Directory"; return }
 
-    local tail file_mime
+    private tail file_mime
 
     tail="${(L)1:t}"
     if [[ -n $MTYPES[${tail#*.}] ]]; then
@@ -341,7 +340,7 @@ function mime_type() {
 #       - LOCK will be declared global so that all f()s have access
 function mklock() {
     typeset -g LOCK=${1}.lock
-    local -i count
+    private -i count
 
     while ! mkdir $LOCK 2>/dev/null; do
         (( ++count >= 2000 )) && { unset LOCK; return 1 }
@@ -402,7 +401,7 @@ function http_listen() {
 
 function parse_ztcp() {
     unset client_ip; typeset -g client_ip
-    local ip_line
+    private ip_line
 
     sessions=$(ztcp -L)
     for ip_line in ${(f@)sessions}; do
@@ -422,7 +421,7 @@ function parse_ztcp() {
 # parsing a request.
 function parse_request() {
     unset req_headers; typeset -gA req_headers
-    local method url version key value line
+    private method url version key value line
 
     # Use HTTP_TIMEOUT for first read since we're blocking until
     # initial bytes from request. We only return 400 when client has
@@ -462,8 +461,8 @@ function parse_request() {
 }
 
 function parse_req_body_chunked() {
-    local buff line
-    local -i count total offset chunk_size
+    private buff line
+    private -i count total offset chunk_size
 
     while :; do
         # Find our hexadecimal first
@@ -507,10 +506,8 @@ function parse_req_body_chunked() {
 }
 
 function parse_req_body_fixed() {
-    local buff
-    local -i count total bufsize
-
-    local -i bufsize
+    private buff
+    private -i count total bufsize
 
     [[ $req_headers[content-length] != <-> ]] && { error_headers 400; return 1 }
     (( req_headers[content-length] > HTTP_BODY_SIZE )) && { error_headers 413; return 1 }
@@ -573,8 +570,9 @@ function return_headers() {
         return 1
     fi
 
-    local i cur_time resp_headers
+    private i resp_headers
     local -x TZ=UTC
+    local cur_time
     get_time
 
     resp_headers="$SERVER_PROTOCOL $1 $HTTP_CODES[$1]\r\n"
@@ -608,7 +606,8 @@ function error_headers() {
 # (quicker than redirecting `print` statements; also faster than
 # shared array)
 function build_index() {
-    local i index
+    local index
+    private i
 
     cd "$1"
 
@@ -641,7 +640,7 @@ function html_fragment() {
 # Quicker to send using `sysread` rather than redirection (ex: `<$1`)
 function send_file() {
     if [[ $req_headers[method] != "HEAD" ]]; then
-        local -i filefd
+        private -i filefd
         exec {filefd}<$1
 
         { while :; do
@@ -659,7 +658,7 @@ function send_file() {
 
 function send_chunk() {
     if [[ $req_headers[method] != "HEAD" ]]; then
-        local buff
+        private buff
 
         # Buffer output into 8K chunks using a pipe and sysread
         while sysread buff; do
@@ -743,7 +742,8 @@ function handler() {
 ###
 # Can we fulfill the request?
 function srv() {
-    local pathname decoded_url
+    local decoded_url
+    private pathname
 
     urldecode ${1:-$req_headers[url]}
     pathname="${DOCROOT}$decoded_url"

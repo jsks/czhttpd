@@ -40,8 +40,8 @@ function send() {
     fi
 
     if (( COMPRESS_CACHE )) && [[ -n $1 ]]; then
-        local -a gzip_fsize
-        local cache_file="$COMPRESS_CACHE_DIR/${1:gs/\//}.gz"
+        private -a gzip_fsize
+        private cache_file="$COMPRESS_CACHE_DIR/${1:gs/\//}.gz"
 
         if [[ ! -f $cache_file || $cache_file -ot $1 ]]; then
             mklock $cache_file

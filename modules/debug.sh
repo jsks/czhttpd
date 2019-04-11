@@ -63,9 +63,9 @@ function log_dbg() {
 }
 
 function log_headers() {
-    local -a str
-    local -i size
-    local i
+    private -a str
+    private -i size
+    private i
 
     for i in ${(k)req_headers}; do
         str+=("${(C)i}: $req_headers[$i]")
@@ -82,8 +82,8 @@ function log_headers() {
 }
 
 function return_headers_hook() {
-    local buf
-    local -a headers response
+    private -a headers response
+    private buf
 
     # There's an extra space that needs to be stripped, otherwise
     # czhttpd will complain about not finding the status code in the
@@ -102,7 +102,8 @@ function return_headers_hook() {
 }
 
 function srv_hook() {
-    local msg decoded_url pathname
+    local decoded_url
+    private msg pathname
 
     urldecode $1
     pathname="${DOCROOT}$decoded_url"
@@ -122,12 +123,9 @@ function srv_hook() {
     log_dbg "$dbg_cmd: requested resource $pathname is $msg"
 }
 
-# This function will be run everywhere, take special care with namespace
 function debug_handler() {
-    setopt extended_glob
     unsetopt err_return
-
-    local dbg_cmd dbg_args dbg_i
+    private dbg_cmd dbg_args dbg_i
 
     dbg_cmd=${ZSH_DEBUG_CMD[(w)1]}
     if [[ ${(w)#ZSH_DEBUG_CMD} > 1 ]]; then
@@ -174,7 +172,7 @@ function debug_handler() {
 }
 
 function TRAPCHLD() {
-    local i line
+    private i line
 
     while read -t 0 -u $dbg_fifofd line; do
         case ${line[(w)2]} in

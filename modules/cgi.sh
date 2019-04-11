@@ -1,9 +1,11 @@
-### Module to handle cgi scripts
+# Module to handle cgi scripts
+#
 # Fair warning: This module isn't that interesting/useful to me
 # so it tends to go untested during updates. But it should work.
 # Maybe. Hopefully.
-
+#
 # TODO: Status: 200 Ok
+###
 
 # Declare our default variables
 : ${CGI_ENABLE:=0}
@@ -15,8 +17,7 @@ rename_fn handler cz::handler
 readonly GATEWAY_INTERFACE="CGI/1.1"
 
 function timeout() {
-    setopt local_traps
-    unsetopt err_return
+    setopt local_traps noerr_return
     local pid1 pid2 pid_status
 
     TRAPCHLD() {
@@ -54,8 +55,8 @@ function check_if_cgi() {
 }
 
 function exec_cgi() {
-    local -a cgi_head cgi_body
-    local cmd pid cgi_status_code
+    private -a cgi_head cgi_body
+    private cmd pid cgi_status_code
 
     local -x CONTENT_LENGTH="${req_headers[content-length]:-NULL}" \
              CONTENT_TYPE="$req_headers[content-type]" \
