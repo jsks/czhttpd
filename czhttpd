@@ -781,9 +781,10 @@ function srv() {
 
 ### Misc
 function cleanup() {
-    setopt noerrreturn
+    setopt noerr_return
 
-    kill -15 ${(SM)jobstates##<->} 2>/dev/null
+    private i
+    for i in $jobstates; kill -15 ${(SM)i##<->} 2>/dev/null
 
     rm -rf $CACHE_DIR
     ztcp -c

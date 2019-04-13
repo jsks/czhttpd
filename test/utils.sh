@@ -11,8 +11,7 @@ typeset -g SRC_DIR TESTTMP TESTROOT CONF PORT
 : ${CONF:=$TESTROOT/cz.conf}
 : ${PORT:=8080}
 
-typeset -g PID
-integer -g debugfd
+integer -gi PID debugfd
 
 function error() {
     print "$*" >&2
@@ -40,7 +39,11 @@ function stop_server() {
 
     kill -15 $PID
     sleep 0.1
-    kill -0 $PID 2>/dev/null && return 1 || return 0
+    if kill -0 $PID 2>/dev/null; then
+        return 1
+    else
+        return 0
+    fi
 }
 
 function heartbeat() {
@@ -72,4 +75,4 @@ function cleanup() {
     rm -rf $SRC_DIR/.czhttpd-pid
 }
 
-trap "sleep 0.1; cleanup 2>/dev/null; exit" INT TERM KILL EXIT ZERR
+trap "sleep 0.1; cleanup; exit" INT TERM KILL EXIT ZERR
