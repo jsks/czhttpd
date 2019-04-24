@@ -52,7 +52,7 @@ typeset IP_REDIRECT PORT MAX_CONN \
         HTTP_KEEP_ALIVE HTTP_TIMEOUT HTTP_RECV_TIMEOUT HTTP_BODY_SIZE \
         HTTP_CACHE HTTP_CACHE_AGE \
         INDEX_FILE HIDDEN_FILES FOLLOW_SYMLINKS \
-        LOG_FILE CACHE CACHE_DIR
+        LOG_FILE HTML_CACHE HTML_CACHE_DIR
 
 typeset -A req_headers
 typeset -a conn_list
@@ -215,7 +215,7 @@ function parse_conf() {
         fi
     done
 
-    for i in HTTP_KEEP_ALIVE HTTP_CACHE HIDDEN_FILES FOLLOW_SYMLINKS CACHE; do
+    for i in HTTP_KEEP_ALIVE HTTP_CACHE HIDDEN_FILES FOLLOW_SYMLINKS HTML_CACHE; do
         if [[ -n ${(P)i} && ${(P)i} != [01] ]]; then
             error "Invalid value for $i, expected 0|1"
         fi
@@ -723,15 +723,15 @@ function handler() {
 
         send $1
     else
-        if (( CACHE )); then
-            local cache_file="${CACHE_DIR}/${1//\//}.html"
+        if (( HTML_CACHE )); then
+            local cache_file="${HTML_CACHE_DIR}/${1//\//}.html"
             if [[ $cache_file -ot $1 || ! -f $cache_file ]]; then
                 mklock $cache_file
                 build_index $1 > $cache_file
                 rmlock
             fi
 
-            { cd $CACHE_DIR; handler ${cache_file:t} } always { cd $DOCROOT }
+            { cd $HTML_CACHE_DIR; handler ${cache_file:t} } always { cd $DOCROOT }
         else
             mtype="text/html"
             send < <(build_index $1)
@@ -750,14 +750,12 @@ function srv() {
 
     if [[ $HIDDEN_FILES != 1 && ${pathname:t} == .* ]]; then
         log_f "Requested resource dot file/directory when HIDDEN_FILES disabled"
-        error_headers 403
-        return
+        error_headers 403; return
     fi
 
     if [[ $FOLLOW_SYMLINKS != 1 && -h ${pathname%/} ]]; then
         log_f "Requested resource symlink when FOLLOW_SYMLINKS disabled"
-        error_headers 403
-        return
+        error_headers 403; return
     fi
 
     { if [[ -f ${pathname%/} ]]; then
@@ -786,7 +784,7 @@ function cleanup() {
     private i
     for i in $jobstates; kill -15 ${(SM)i##<->} 2>/dev/null
 
-    rm -rf $CACHE_DIR
+    rm -rf $HTML_CACHE_DIR
     ztcp -c
     log_f "> Exiting main"
 }
@@ -823,8 +821,8 @@ function cz_init() {
     log_f "INDEX_FILE: ${INDEX_FILE:=index.html}"
     log_f "HIDDEN_FILES: ${HIDDEN_FILES:=0}"
     log_f "FOLLOW_SYMLINKS: ${FOLLOW_SYMLINKS:=0}"
-    log_f "CACHE: ${CACHE:=0}"
-    log_f "CACHE_DIR: ${CACHE_DIR:=/tmp/.czhttpd-$$/}"
+    log_f "HTML_CACHE: ${HTML_CACHE:=0}"
+    log_f "HTML_CACHE_DIR: ${HTML_CACHE_DIR:=/tmp/.czhttpd-$$/}"
     log_f "LOG_FILE: ${LOG_FILE:=/dev/null}"
 
     # readonly vars that should not be modified by anything except this f()
@@ -859,8 +857,8 @@ function cz_init() {
                  default   application/octet-stream )
     fi
 
-    if (( CACHE )) && [[ ! -d $CACHE_DIR ]]; then
-        mkdir $CACHE_DIR || error "Failed to create cache dir"
+    if (( HTML_CACHE )) && [[ ! -d $HTML_CACHE_DIR ]]; then
+        mkdir $HTML_CACHE_DIR || error "Failed to create cache dir"
     fi
 }
 
