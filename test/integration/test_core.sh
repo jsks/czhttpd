@@ -13,6 +13,7 @@ HTTP_KEEP_ALIVE=1
 HTTP_TIMEOUT=2
 HTTP_RECV_TIMEOUT=1
 HTTP_BODY_SIZE=16384
+HTTP_CACHE=0
 INDEX_FILE=index.html
 HIDDEN_FILES=0
 FOLLOW_SYMLINKS=0
@@ -78,27 +79,6 @@ check --method "PUT" 127.0.0.1:$PORT \
 describe "HTTP/1.0 request"
 check --http 1.0 127.0.0.1:$PORT \
       --http_code 505
-
-# What about if-modified-since and if-unmodified-since
-describe "Request unmodified file"
-check --header "If-Modified-Since: $(unixtime)" 127.0.0.1:$PORT/file.txt \
-      --http_code 304
-
-describe "Request modified file"
-check --header "If-Modified-Since: $(unixtime 20)" 127.0.0.1:$PORT/file.txt \
-      --http_code 200
-
-describe "Send if unmodified"
-check --header "If-Unmodified-Since: $(unixtime)" 127.0.0.1:$PORT/file.txt \
-      --http_code 200
-
-describe "412 file modified"
-check --header "If-Unmodified-Since: $(unixtime 40000)" 127.0.0.1:$PORT/file.txt \
-      --http_code 412
-
-describe "Invalid time for if-modified-since"
-check --header "If-Modified-Since: $(date)" 127.0.0.1:$PORT/file.txt \
-      --http_code 200
 
 # Finally, check that our headers are being set properly
 describe "Client Connection: close"

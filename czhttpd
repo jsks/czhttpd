@@ -50,6 +50,7 @@ typeset CONFIG DOCROOT STDOUT
 
 typeset IP_REDIRECT PORT MAX_CONN \
         HTTP_KEEP_ALIVE HTTP_TIMEOUT HTTP_RECV_TIMEOUT HTTP_BODY_SIZE \
+        HTTP_CACHE HTTP_CACHE_AGE \
         INDEX_FILE HIDDEN_FILES FOLLOW_SYMLINKS \
         LOG_FILE CACHE CACHE_DIR
 
@@ -199,7 +200,7 @@ exit
 
 ### Initialization functions
 function parse_conf() {
-    local i
+    private i
 
     if [[ -f $1 ]]; then
         . $1 || error "Could not source config file $1"
@@ -210,13 +211,13 @@ function parse_conf() {
 
     for i in PORT MAX_CONN HTTP_TIMEOUT HTTP_RECV_TIMEOUT HTTP_BODY_SIZE; do
         if [[ -n ${(P)i} && ${(P)i} != <-> ]]; then
-            error "Invalid integer for $i"
+            error "Invalid value for $i, expected integer"
         fi
     done
 
-    for i in HTTP_KEEP_ALIVE HIDDEN_FILES FOLLOW_SYMLINKS CACHE; do
+    for i in HTTP_KEEP_ALIVE HTTP_CACHE HIDDEN_FILES FOLLOW_SYMLINKS CACHE; do
         if [[ -n ${(P)i} && ${(P)i} != [01] ]]; then
-            error "Invalid integer for $i"
+            error "Invalid value for $i, expected 0|1"
         fi
     done
 
@@ -296,6 +297,13 @@ function calc_size() {
     (( stat_size > GB )) && { ((stat_size/=GB)); fsize="${stat_size}G"; return }
 }
 
+# Generates ETAG string for a given file from its mtime, inode, and
+# our pseudo randomly generated server version string.
+#   @Sets `etag`
+function gen_etag() {
+    printf -v etag "\"%x-%x-%s\"" $@ $SERVER_SOFTWARE
+}
+
 # Formatted time string
 #   @Sets `cur_time`
 function get_time() {
@@ -348,7 +356,7 @@ function mklock() {
         sleep 0.01
     done
 
-    return 0
+    return
 }
 
 # Formatted last modification time for file
@@ -357,24 +365,12 @@ function mod_time() {
     stat -A mtime -L -F "%d-%b-%Y %T" +mtime $1 2>/dev/null || print "\-"
 }
 
-# Parse If-Modified-Since/If-Unmodified-Since date string
-#   @Sets `unixtime`
-function parse_datestr() {
-    strftime -s unixtime -r "%a, %d %b %Y %H:%M:%S %Z" $1
-}
-
 # Unlock using rmdir
 #   @Unsets `LOCK`
 function rmlock() {
     if [[ -n $LOCK ]]; then
         rmdir $LOCK; unset LOCK
     fi
-}
-
-# Modification time for file in seconds since unix epoch
-#   @Sets `local_mtime`
-function unixmod_time() {
-    stat -A local_mtime +mtime $1
 }
 
 # Decode url
@@ -675,8 +671,15 @@ function send_chunk() {
 # or as whole
 function send() {
     if [[ -n $1 ]]; then
+        if (( HTTP_CACHE )); then
+            private -a cache_headers=("Cache-Control: max-age=$HTTP_CACHE_AGE" \
+                                       "Etag: $etag")
+        fi
+
         return_headers 200 "Content-type: $mtype; charset=UTF-8" \
-                      "Content-Length: $fsize"
+                       "Content-Length: $fsize" \
+                       $cache_headers
+
         send_file $1
     else
         return_headers 200 "Content-type: $mtype; charset=UTF-8" \
@@ -688,36 +691,33 @@ function send() {
 }
 
 ###
-# How to fulfill valid request (create directory listing or send a file etc etc)
+# How to fulfill valid request (create directory listing or send a
+# file etc etc)
 function handler() {
     # We'll only allow POST for CGI scripts. If this function is being
     # invoked we're either dealing with dir listing or a file.
     [[ $req_headers[method] == "POST" ]] && error_headers 405
 
     if [[ -f $1 ]]; then
-        local mtype unixtime local_mtime
+        local mtype
         local -a fsize
 
         [[ -z $mtype ]] && mime_type $1
         [[ -z $fsize ]] && stat -A fsize -L +size $1
 
-        if [[ -n $req_headers[if-modified-since] ]] && \
-               parse_datestr $req_headers[if-modified-since]; then
-            unixmod_time $1
+        if (( HTTP_CACHE )); then
+            local -a inode mtime
+            local etag
 
-            if (( local_mtime > unixtime )); then
-                send $1
-            else
+            [[ -z $inode ]] && stat -A inode -L +inode $1
+            [[ -z $mtime ]] && stat -A mtime -L +mtime $1
+            [[ -z $etag ]] && gen_etag $mtime $inode
+
+            if [[ -n $req_headers[if-none-match] && \
+                      $etag == $req_headers[if-none-match] ]]; then
                 return_headers 304
-            fi
-        elif [[ -n $req_headers[if-unmodified-since] ]] && \
-                 parse_datestr $req_headers[if-unmodified-since]; then
-            unixmod_time $1
-
-            if (( local_mtime <= unixtime )); then
-                send $1
-            else
-                return_headers 412
+                log_f 304
+                return
             fi
         fi
 
@@ -818,6 +818,8 @@ function cz_init() {
     log_f "HTTP_TIMEOUT: ${HTTP_TIMEOUT:=30}"
     log_f "HTTP_RECV_TIMEOUT: ${HTTP_RECV_TIMEOUT:=5}"
     log_f "HTTP_BODY_SIZE: ${HTTP_BODY_SIZE:=16384}"
+    log_f "HTTP_CACHE: ${HTTP_CACHE:=0}"
+    log_f "HTTP_CACHE_AGE: ${HTTP_CACHE_AGE:=200}"
     log_f "INDEX_FILE: ${INDEX_FILE:=index.html}"
     log_f "HIDDEN_FILES: ${HIDDEN_FILES:=0}"
     log_f "FOLLOW_SYMLINKS: ${FOLLOW_SYMLINKS:=0}"

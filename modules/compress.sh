@@ -48,9 +48,15 @@ function send() {
 
         stat -A gzip_fsize -L +size $cache_file
 
+        if (( HTTP_CACHE )); then
+            private -a cache_headers=("Cache-Control: max-age=$HTTP_CACHE_AGE" \
+                                       "Etag: $etag")
+        fi
+
         return_headers 200 \
                        "Content-type: ${mtype:-application:octet-stream}; charset=UTF-8" \
-                       "Content-Encoding: gzip" "Content-Length: $gzip_fsize"
+                       "Content-Encoding: gzip" "Content-Length: $gzip_fsize" \
+                       $cache_headers
         send_file $cache_file
     else
         return_headers 200 \
