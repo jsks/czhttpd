@@ -71,10 +71,11 @@ function cleanup() {
     setopt noerr_return
     stop_server
 
-    [[ $TESTROOT == "/tmp/czhttpd-test" ]] && rm -rf $TESTROOT
-    [[ $TESTTMP == "/tmp/cztest-$$" ]] && rm -rf $TESTTMP
+    # Only delete default TESTROOT and TESTTMP
+    [[ -d "/tmp/czhttpd-test" ]] && rm -rf "/tmp/czhttpd-test"
+    [[ -d "/tmp/cztest-$$" ]] && rm -rf "/tmp/cztest-$$"
 
     rm -rf $SRC_DIR/.czhttpd-pid
 }
 
-trap "sleep 0.1; cleanup; exit" INT TERM KILL EXIT ZERR
+trap "cleanup; exit" INT TERM KILL EXIT ZERR
