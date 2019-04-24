@@ -111,7 +111,7 @@ check 127.0.0.1:$PORT \
       --header_compare 'Content-type: text/plain'
 
 stop_server
-TESTROOT=/tmp/czhttpd-test
+TESTROOT=${TESTROOT:h}
 start_server
 heartbeat
 
@@ -144,6 +144,7 @@ source $SRC_DIR/modules/debug.sh
 MAX_CONN=4
 HTTP_KEEP_ALIVE=1
 HTTP_BODY_SIZE=5
+HTTP_CACHE=1
 HIDDEN_FILES=1
 FOLLOW_SYMLINKS=1
 HTML_CACHE=1
@@ -152,7 +153,7 @@ reload_conf
 
 # Let's check that czhttpd is caching html files. The only way really is to see
 # if the file is being sent with fixed length rather than chunked.
-describe "Cache request"
+describe "HTML cache request"
 check 127.0.0.1:$PORT \
       --http_code 200 \
       --header_compare 'Content-length: [0-9]'
@@ -168,6 +169,16 @@ check 127.0.0.1:$PORT/link \
       --http_code 200 \
       --file_compare $TESTROOT/file.txt \
       --header_compare 'Content-type: text/plain'
+
+# Check HTTP caching by requesting the same file again with the etag
+# sent from the previous request.
+describe "HTTP cache request"
+check --header "If-None-Match: $CHTTP_RESP_HEADERS[etag]" 127.0.0.1:$PORT/link \
+      --http_code 304
+
+describe "No HTTP cache when mismatched etags"
+check --header "If-None-Match: hello-world" 127.0.0.1:$PORT/link \
+      --http_code 200
 
 # Check parsing request message body
 describe "Fixed request body too large"

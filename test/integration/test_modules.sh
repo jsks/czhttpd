@@ -93,6 +93,8 @@ typeset -ga DEBUG_TRACE_FUNCS
 DEBUG_TRACE_FUNCS=($TRACE_FUNCS)
 source $SRC_DIR/modules/debug.sh
 
+HTTP_CACHE=1
+
 URL_REWRITE=0
 CGI_ENABLE=0
 COMPRESS=1
@@ -125,6 +127,10 @@ describe "Cached dir request"
 check --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT \
       --header_compare 'Content-Length: [0-9]'
 
+describe "HTTP caching with gzip"
+check --header "If-None-Match: $CHTTP_RESP_HEADERS[etag]" 127.0.0.1:$PORT \
+      --http_code 304
+
 rm $TESTROOT/compress.txt $TESTROOT/compress.txt.gz
 
 ###
@@ -134,6 +140,8 @@ DEBUG=1
 typeset -ga DEBUG_TRACE_FUNCS
 DEBUG_TRACE_FUNCS=($TRACE_FUNCS)
 source $SRC_DIR/modules/debug.sh
+
+HTTP_CACHE=0
 
 URL_REWRITE=0
 COMPRESS=0
