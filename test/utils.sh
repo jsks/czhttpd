@@ -13,6 +13,10 @@ typeset -g SRC_DIR TESTTMP TESTROOT CONF PORT
 
 integer -gi PID debugfd
 
+function alive() {
+    kill -0 $1 2>/dev/null
+}
+
 function error() {
     print "$*" >&2
     exit 115
@@ -22,7 +26,7 @@ function start_server() {
     setopt noerr_return
 
     if [[ -f $SRC_DIR/.czhttpd-pid ]] &&
-           kill -0 $(<$SRC_DIR/.czhttpd-pid) 2>/dev/null; then
+           alive $(<$SRC_DIR/.czhttpd-pid); then
         error "czhttpd already running?"
     fi
 
@@ -35,21 +39,19 @@ function start_server() {
 }
 
 function stop_server() {
-    [[ -z $PID ]] && return 0
+    if [[ -z $PID ]] || ! alive $PID; then
+        return 0
+    fi
 
     kill -15 $PID
     sleep 0.1
-    if kill -0 $PID 2>/dev/null; then
-        return 1
-    else
-        return 0
-    fi
+    ! alive $PID
 }
 
 function heartbeat() {
     repeat 3; do
         sleep 0.1
-        if ! kill -0 $PID 2>/dev/null; then
+        if ! alive $PID; then
             (( PORT++ ))
             start_server
         else
