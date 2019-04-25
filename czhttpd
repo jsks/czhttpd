@@ -323,14 +323,18 @@ function mime_type() {
     [[ -h "${1%/}" ]] && mtype="symbolic link->"
     [[ -d "$1" ]] && { mtype+="Directory"; return }
 
-    private tail file_mime
+    private tail="${(L)1:t}"
 
-    tail="${(L)1:t}"
+    # If we're dealing with a hidden file, we treat the character
+    # string following the first '.' as the rootname, with the
+    # extension being everything after the second '.'.
+    [[ $tail[1] == "." ]] && tail=${tail[2,-1]}
+
     if [[ -n $MTYPES[${tail#*.}] ]]; then
         mtype+="$MTYPES[${tail#*.}]"
     else
         if which file >/dev/null; then
-            file_mime=$(file --mime-type -bL $1)
+            private file_mime=$(file --mime-type -bL $1)
 
             case $file_mime in
                 (*"no read permission")
