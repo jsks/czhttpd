@@ -55,7 +55,6 @@ typeset IP_REDIRECT PORT MAX_CONN \
         LOG_FILE HTML_CACHE HTML_CACHE_DIR
 
 typeset -A req_headers
-typeset -a conn_list
 
 integer logfd
 
