@@ -8,10 +8,7 @@ if [[ -t 1 ]] && (( $terminfo[colors] >= 8 )); then
     colors
 fi
 
-zmodload zsh/datetime
-zmodload zsh/pcre
-zmodload zsh/stat
-zmodload zsh/system
+for i in datetime pcre stat system; zmodload zsh/$i || exit 127
 
 setopt err_return rematch_pcre
 
