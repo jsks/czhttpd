@@ -407,12 +407,15 @@ function http_listen() {
 }
 
 function parse_ztcp() {
-    unset client_ip; typeset -g client_ip
-    private ip_line
+    unset client_host; typeset -g client_host
+    private sessions conn_line
 
     sessions=$(ztcp -L)
-    for ip_line in ${(f@)sessions}; do
-        [[ $ip_line[3] == "I" ]] && { client_ip=${ip_line[(w)3]}; break }
+    for conn_line in ${(f@)sessions}; do
+        if [[ $conn_line[3] == "I" ]]; then
+            client_host=${conn_line[(w)5]}
+            break
+        fi
     done
 }
 
@@ -807,7 +810,7 @@ function TRAPHUP() {
 function cz_init() {
     LOG_FORMAT=( '[$cur_time]'
                  '[pid: ${pid:-$sysparams[pid]}]'
-                 '$client_ip'
+                 '$client_host'
                  '$req_headers[method]'
                  '$req_headers[url]'
                  '$req_headers[version]' )
