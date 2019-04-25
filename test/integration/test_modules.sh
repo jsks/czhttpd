@@ -8,7 +8,6 @@ source $SRC_DIR/modules/debug.sh
 typeset -g URL_REWRITE=0
 typeset -g CGI_ENABLE=0
 typeset -g COMPRESS=0
-typeset -g IP_MATCH=0
 
 typeset -gA URL_PATTERNS
 URL_PATTERNS=( "/file.txt" "/.dot.txt" )
@@ -189,87 +188,3 @@ check 127.0.0.1:$PORT/test_app_fail2.sh \
       --http_code 500
 
 rm $TESTROOT/*.sh
-
-###
-# Finally, test ip match module.
-#
-# Now this is pretty dumb, so hold with me. The IP match module will
-# never reject a connection from localhost. So, in order to test it we
-# try to find a local ip address. If we can't, simply print a warning
-# message instead of crashing our tests.
-case $OSTYPE in
-    (linux*)
-        ip=$(hostname -I | awk '{ print $1 }');;
-    (darwin*|*bsd*)
-        ip=$(ifconfig | awk '$1 == "inet" && $2 != "127.0.0.1" { print $2 }');;
-esac
-
-if [[ -z $ip || ip == "127.0.0.1" ]]; then
-    print "Unable to find suitable IP, skipping IP match tests..."
-    return
-fi
-
-<<EOF > $CONF
-DEBUG=1
-typeset -ga DEBUG_TRACE_FUNCS
-DEBUG_TRACE_FUNCS=($TRACE_FUNCS)
-source $SRC_DIR/modules/debug.sh
-
-URL_REWRITE=0
-COMPRESS=0
-CGI_ENABLE=0
-IP_MATCH=1
-
-source $SRC_DIR/modules/ip_match.sh
-EOF
-reload_conf
-
-describe "Accept all IPs"
-check $ip:$PORT/ \
-      --http_code 200
-
-<<EOF > $CONF
-DEBUG=1
-typeset -ga DEBUG_TRACE_FUNCS
-DEBUG_TRACE_FUNCS=($TRACE_FUNCS)
-source $SRC_DIR/modules/debug.sh
-
-URL_REWRITE=0
-COMPRESS=0
-CGI_ENABLE=0
-
-IP_MATCH=1
-IP_ACCEPT=127.0.0.1
-
-source $SRC_DIR/modules/ip_match.sh
-EOF
-reload_conf
-
-describe "Reject unmatched ip"
-check $ip:$PORT/file.txt \
-      --fail
-
-<<EOF > $CONF
-DEBUG=1
-typeset -ga DEBUG_TRACE_FUNCS
-DEBUG_TRACE_FUNCS=($TRACE_FUNCS)
-source $SRC_DIR/modules/debug.sh
-
-URL_REWRITE=0
-COMPRESS=0
-CGI_ENABLE=0
-
-IP_MATCH=1
-IP_ACCEPT='${ip%.*}.*'
-
-source $SRC_DIR/modules/ip_match.sh
-EOF
-reload_conf
-
-describe "Accept matched ip"
-check $ip:$PORT/file.txt \
-      --http_code 200
-
-describe "Accept localhost"
-check 127.0.0.1:$PORT/file.txt \
-      --http_code 200

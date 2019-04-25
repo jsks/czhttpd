@@ -32,7 +32,6 @@ Additionally, to run the full test suite the following external commands are req
     - Gzip compression
     - Basic CGI/1.1 support
         - phpMyAdmin appears fully functional, and partially Wordpress (requires configuring for an alternative port)
-    - IP filtering
     - Basic url rewrite
 
 ### Configuration
