@@ -74,6 +74,10 @@ HTTP_CODES=( 200    "Ok"
 
 readonly HTTP_CODES ARGV="$*"
 
+# Set once for every invocation of czhttpd
+readonly SERVER_SOFTWARE="czhttpd/$(printf '%.1f\n' "$((RANDOM/10000.0))")b" \
+         SERVER_PROTOCOL="HTTP/1.1"
+
 ### Platform specific code
 function ip_addr() {
     case $OSTYPE in
@@ -827,9 +831,7 @@ function cz_init() {
     # readonly vars that should not be modified by anything except this f()
     typeset +r -g SERVER_NAME="$IP_REDIRECT"
     typeset +r -g SERVER_ADDR="$SERVER_NAME"
-    typeset +r -g SERVER_SOFTWARE="czhttpd/$(printf '%.1f\n' "$((RANDOM/10000.0))")b"
-    typeset +r -g SERVER_PROTOCOL="HTTP/1.1"
-    readonly -g SERVER_NAME SERVER_ADDR SERVER_SOFTWARE SERVER_PROTOCOL
+    readonly -g SERVER_NAME SERVER_ADDR
 
     if [[ -z $MTYPES ]]; then
         MTYPES=( pdf       application/pdf
