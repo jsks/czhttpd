@@ -35,7 +35,7 @@ check --header 'Accept-Encoding: gzip' 127.0.0.1:$PORT \
       --header_compare 'Content-Encoding: ^(?!.*gzip).*$'
 
 <<EOF > $TESTROOT/test_app.sh
-#!/bin/zsh
+#!/usr/bin/env zsh
 print "Content-type: text/plain\n\n"
 print "Hello World"
 EOF
@@ -154,14 +154,14 @@ EOF
 reload_conf
 
 <<EOF > $TESTROOT/test_app.sh
-#!/bin/zsh
+#!/usr/bin/env zsh
 print "Content-type: text/plain\n\n"
 print "Hello World"
 EOF
 chmod +x $TESTROOT/test_app.sh
 
 <<EOF > $TESTROOT/test_app_fail1.sh
-#!/bin/zsh
+#!/usr/bin/env zsh
 print "Content-type: text/plain\n\n"
 sleep 7
 print "foo"
@@ -169,7 +169,7 @@ EOF
 chmod +x $TESTROOT/test_app_fail1.sh
 
 <<EOF > $TESTROOT/test_app_fail2.sh
-#!/bin/zsh
+#!/usr/bin/env zsh
 print
 print "foo"
 EOF
