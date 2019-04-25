@@ -33,7 +33,7 @@ mkdir -p $TESTTMP $TESTROOT
 function assert() {
     if [[ $3 =~ $2 ]]; then
         (( STATS[pass]++ )) || :
-        if (( VERBOSE )); then
+        if (( pause || VERBOSE )); then
             assert_strs+="$fg[green]✓$fg[white] $i ($fg[blue]$opts[$i]$fg[white])"
         fi
     else
@@ -63,9 +63,10 @@ czhttpd test script
 Options:
     -l | --log          Redirect czhttpd output to given file
     -p | --port         Port to pass to czhttpd (Default: 8080)
-    -s | --stepwise     Pause after specified test. Argument can also be a comma
-                          deliminated list of tests or ranges of tests
-                          (ex: -s 2,4,6-9)
+    -s | --stepwise     Pause after specified test matching description or
+                          order number. Argument can also be a comma
+                          deliminated list of tests by number or ranges of
+                          tests. (ex: -s 2,6-9,"Test unknown method")
     -t | --trace        Enable function tracing for the following comma
                           deliminated list of czhttpd functions
     -v | --verbose      Enable verbose output
@@ -101,6 +102,10 @@ function check() {
     local output i req_rv
 
     (( STATS[count]++ )) || :
+    if [[ -n ${STEPWISE[(r)$STATS[count]]} ||
+              ${STEPWISE[(r)$DESC_STR]} ]]; then
+        local pause=1
+    fi
 
     zparseopts -E -D -A opts -file_compare: -header_compare: -size_download: \
                -http_code: -fail
@@ -111,7 +116,7 @@ function check() {
     # If we don't explicitly want http_client to fail, error out
     # here. Really should provide better error messages...
     if [[ ${+opts[--fail]} == 0 && ${req_rv:-0} != 0 ]]; then
-        error "Error connecting to server"
+        error "$fg[cyan]$STATS[count]$fg[white]. $DESC_STR: $req_rv Error connecting to server"
     fi
 
     # Add to global arrays to keep track of timings for final stats
@@ -136,13 +141,13 @@ function check() {
         esac
     done
 
-    if (( VERBOSE || ${#assert_strs} )); then
+    if (( pause || VERBOSE || ${#assert_strs} )); then
         print "$fg[cyan]$STATS[count]$fg[white]. $DESC_STR"
         for s in $assert_strs; print $s
         info
     fi
 
-    [[ -n ${STEPWISE[(r)$STATS[count]]} ]] && { read -k '?Press any key to continue...' }
+    (( pause )) && read -k '?Press any key to continue...'
 
     unset DESC_STR
     return 0
@@ -197,11 +202,11 @@ for i in ${(k)opts}; do
     case $i in
         ("--stepwise"|"-s")
             for i in ${(s.,.)opts[$i]}; do
-                if [[ -n ${(SM)i#-} ]]; then
+                if [[ $i =~ "[0-9]{1,2}-[0-9]{1,2}" ]]; then
                     for j in {${i[(ws.-.)1]}..${i[(ws.-.)2]}}; do
-                        [[ $j == <-> ]] && STEPWISE+=$j
+                        STEPWISE+=$j
                     done
-                elif [[ $i == <-> ]]; then
+                else
                     STEPWISE+=($i)
                 fi
             done;;
