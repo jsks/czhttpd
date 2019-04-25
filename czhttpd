@@ -710,7 +710,7 @@ function send() {
 function handler() {
     # We'll only allow POST for CGI scripts. If this function is being
     # invoked we're either dealing with dir listing or a file.
-    [[ $req_headers[method] == "POST" ]] && error_headers 405
+    [[ $req_headers[method] == "POST" ]] && { error_headers 405; return }
 
     if [[ -f $1 ]]; then
         local mtype
