@@ -301,7 +301,11 @@ function calc_size() {
 # our pseudo randomly generated server version string.
 #   @Sets `etag`
 function gen_etag() {
-    printf -v etag "\"%x-%x-%s\"" $@ $SERVER_SOFTWARE
+    private -a inode mtime
+    stat -A inode -L +inode $1
+    stat -A mtime -L +mtime $1
+
+    printf -v etag "\"%x-%x-%s\"" $mtime $inode $SERVER_SOFTWARE
 }
 
 # Formatted time string
@@ -706,12 +710,8 @@ function handler() {
         [[ -z $fsize ]] && stat -A fsize -L +size $1
 
         if (( HTTP_CACHE )); then
-            local -a inode mtime
             local etag
-
-            [[ -z $inode ]] && stat -A inode -L +inode $1
-            [[ -z $mtime ]] && stat -A mtime -L +mtime $1
-            [[ -z $etag ]] && gen_etag $mtime $inode
+            [[ -z $etag ]] && gen_etag $1
 
             if [[ -n $req_headers[if-none-match] && \
                       $etag == $req_headers[if-none-match] ]]; then
