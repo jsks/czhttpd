@@ -7,11 +7,14 @@ typeset -gi URL_REWRITE
 : ${URL_REWRITE:=0}
 
 if [[ $URL_REWRITE != [01] ]]; then
-    log_err "Invalid integer for URL_REWRITE"
+    log_err "Invalid value for URL_REWRITE, expected 0|1"
     return 1
 fi
 
-zmodload zsh/pcre
+if ! zmodload zsh/pcre 2>/dev/null; then
+    log_err "pcre module missing, unable to source url_rewrite"
+    return
+fi
 
 rename_fn srv cz::srv
 
