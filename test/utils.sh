@@ -5,7 +5,7 @@ setopt local_options
 
 typeset -g SRC_DIR TESTTMP TESTROOT CONF PORT
 
-: ${SRC_DIR:=$(git rev-parse --show-toplevel)}
+: ${SRC_DIR:=${0:A:h}/../}
 : ${TESTTMP:=/tmp/cztest-$$}
 : ${TESTROOT:=/tmp/czhttpd-test}
 : ${CONF:=$TESTROOT/cz.conf}

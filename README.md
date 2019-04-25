@@ -20,7 +20,7 @@ the current directory.
 ### Dependencies
 `>=zsh-5.6`. If available, `file` is used for fallback mime-type support. macOS/*BSD also rely on `ifconfig` when `IP_REDIRECT` is not set.
 
-Additionally, to run the full test suite the following external commands are required: `git`, `awk`, `md5sum`/`md5`, `vegeta`.
+Additionally, to run the full test suite the following external commands are required: `awk`, `md5sum`/`md5`, `vegeta`.
 
 ### Features
 - Basic support for `HTTP/1.1` (methods limited to `HEAD`, `GET`, `POST`)
