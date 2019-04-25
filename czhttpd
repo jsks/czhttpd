@@ -872,8 +872,6 @@ while :; do
     ztcp -a $listenfd
     fd=$REPLY
 
-    parse_ztcp
-
     if (( ${#jobstates} >= MAX_CONN )); then
         error_headers 503 >&$fd
         ztcp -c $fd
@@ -884,6 +882,8 @@ while :; do
      trap '' PIPE
 
      setopt err_return
+
+     parse_ztcp
 
      while :; do
          # err_return does not work in condition expressions, see:
