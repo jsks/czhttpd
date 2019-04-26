@@ -10,7 +10,7 @@ fi
 
 for i in datetime pcre stat system; zmodload zsh/$i || exit 127
 
-setopt err_return rematch_pcre
+setopt rematch_pcre
 
 typeset -gA STATS
 STATS[count]=0

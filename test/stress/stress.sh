@@ -9,8 +9,6 @@ if [[ -t 1 ]] && (( $terminfo[colors] >= 8 )); then
     colors
 fi
 
-setopt err_return
-
 which vegeta >/dev/null || error "Missing vegeta, unable to run stress tests"
 
 typeset -g VEGETA_OPTS VERBOSE DURATION

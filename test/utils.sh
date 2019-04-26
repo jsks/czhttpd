@@ -1,7 +1,7 @@
 # Utility functions/variables for testing czhttpd
 ###
 
-setopt local_options
+setopt err_return local_options
 
 typeset -g SRC_DIR TESTTMP TESTROOT CONF PORT
 
@@ -68,6 +68,9 @@ function reload_conf() {
 }
 
 function cleanup() {
+    # Return value of previous command before trap was triggered
+    private rv=$?
+
     setopt noerr_return
     stop_server
 
@@ -76,6 +79,8 @@ function cleanup() {
     [[ -d "/tmp/cztest-$$" ]] && rm -rf "/tmp/cztest-$$"
 
     rm -rf $SRC_DIR/.czhttpd-pid
+
+    return $rv
 }
 
-trap "cleanup; exit" INT TERM KILL EXIT ZERR
+trap "cleanup" INT TERM KILL EXIT
