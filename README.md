@@ -27,7 +27,12 @@ shipped by your OS is older.
 
 ```sh
 $ docker pull jsks/czhttpd
+
+# Launch default directory listing of czhttpd files
 $ docker run -p 8080:8080 -it jsks/czhttpd
+
+# To serve a local directory use a bind mount
+$ docker run -p 8080:8080 -v $PWD:/data -it jsks/czhttpd czhttpd -v /data
 ```
 
 ### Optional Dependencies
@@ -41,6 +46,7 @@ Additionally, running the full test suite requires `md5sum`/`md5` and
 `vegeta`.
 
 ### Features
+
 - Basic support for `HTTP/1.1` (methods limited to `HEAD`, `GET`,
   `POST`)
 - Dynamic directory listing with primitive caching

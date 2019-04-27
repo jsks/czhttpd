@@ -8,12 +8,15 @@ RUN groupadd czhttpd \
 USER czhttpd
 
 ENV APP=/home/czhttpd/src
+ENV PATH="$APP:$PATH"
+
 RUN mkdir -p $APP/modules/ $APP/test/
-COPY --chown=czhttpd:czhttpd czhttpd Makefile $APP/
 COPY --chown=czhttpd:czhttpd modules/ $APP/modules/
 COPY --chown=czhttpd:czhttpd test/ $APP/test/
+COPY --chown=czhttpd:czhttpd czhttpd Makefile $APP/
+RUN chmod +x $APP/czhttpd
 
 WORKDIR $APP
 RUN make clean
 
-CMD ["zsh", "czhttpd", "-v"]
+CMD ["czhttpd", "-v"]
