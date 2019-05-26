@@ -1,4 +1,4 @@
-FROM zshusers/zsh-master
+FROM zshusers/zsh:master
 
 RUN rm -rf /usr/share/zsh/*/scripts/newuser
 RUN install_packages make
