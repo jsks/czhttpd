@@ -1,3 +1,7 @@
+###########################################################
+# Stress test file serving. Will be sourced by `stress.sh #
+###########################################################
+
 <<EOF > $CONF
 MAX_CONN=12
 HTTP_KEEP_ALIVE=1

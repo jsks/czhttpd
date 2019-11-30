@@ -1,3 +1,7 @@
+####################################################################
+# Stress test concurrent connections. Will be sourced by `test.sh` #
+####################################################################
+
 VEGETA_OPTS+=" -rate=500/1s -keepalive=false"
 
 <<EOF > $CONF

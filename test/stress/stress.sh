@@ -18,6 +18,7 @@ readonly -g STRESS_DIR=${0:A:h}
 readonly -g REPORT_DIR=$STRESS_DIR/report
 readonly -g HTML_DIR=$STRESS_DIR/html
 
+# Import common testing functions/variables
 source $STRESS_DIR/../utils.sh
 
 mkdir -p $TESTTMP $TESTROOT
@@ -25,13 +26,21 @@ mkdir -p $TESTTMP $TESTROOT
 
 function help() {
 <<EOF
-czhttpd stress test script
+Usage: stress.sh [OPTIONS] [file]
+
+czhttpd stress test and benchmarking script
 
 Options:
     -d | --duration   Vegeta attack duration (default: 5s)
+    -h | --help       This help message
     -l | --log        Redirect czhttpd output to given file
     -p | --port       Port to pass to czhttpd (Default: 8080)
     -v | --verbose    Enable verbose output
+
+Actual tests are split into separate stress_*.sh files which will be sourced by
+this script. To run only a subset of tests, a specific file can be provided as
+a CLI argument. Otherwise, by default, all tests will be run.
+
 EOF
 
 exit
@@ -95,6 +104,7 @@ for i in {a..z}; print -n "Hello World!" > $TESTROOT/$i.html
 mkdir -p $REPORT_DIR $HTML_DIR
 rm -rf $REPORT_DIR/*.bin(N) $HTML_DIR/*.html(N)
 
+# If we don't specify an individual test file, run everything
 for i in ${1:-$STRESS_DIR/stress_*.sh}; do
     print "$fg_bold[magenta]${i:t}$fg_no_bold[white]"
     source $i

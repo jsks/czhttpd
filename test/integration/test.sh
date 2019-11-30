@@ -25,6 +25,7 @@ typeset -g DESC_STR VERBOSE
 
 readonly -g TEST_DIR=${0:A:h}
 
+# Import common testing functions/variables
 source $TEST_DIR/../utils.sh
 
 mkdir -p $TESTTMP $TESTROOT
@@ -58,10 +59,13 @@ function unixtime() {
 
 function help() {
 <<EOF
-czhttpd test script
+Usage: test.sh [OPTIONS] [file]
+
+czhttpd integration test script
 
 Options:
     -l | --log          Redirect czhttpd output to given file
+    -h | --help         This help message
     -p | --port         Port to pass to czhttpd (Default: 8080)
     -s | --stepwise     Pause after specified test matching description or
                           order number. Argument can also be a comma
@@ -70,6 +74,11 @@ Options:
     -t | --trace        Enable function tracing for the following comma
                           deliminated list of czhttpd functions
     -v | --verbose      Enable verbose output
+
+Actual tests are split into separate test_*.sh files which will be sourced by
+this script. To run only a subset of tests, a specific file can be provided as
+a CLI argument. Otherwise, by default, all tests will be run.
+
 EOF
 
 exit
@@ -241,6 +250,7 @@ print space > $TESTROOT/file\ space.txt
 print goodbye > $TESTROOT/.dot.txt
 ln -s $TESTROOT/file.txt $TESTROOT/link
 
+# If we don't specify an individual test file, run everything
 for i in ${1:-$TEST_DIR/test_*.sh}; do
     (( VERBOSE )) && print "$fg_bold[magenta]${i:t}$fg_no_bold[white]"
     source $i

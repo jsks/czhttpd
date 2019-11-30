@@ -1,4 +1,5 @@
-# Utility functions/variables for testing czhttpd
+# Library file of utility functions/variables used for testing czhttpd. Useless
+# to call directly.
 ###
 
 setopt err_return local_options

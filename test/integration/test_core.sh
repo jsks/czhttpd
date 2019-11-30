@@ -1,5 +1,9 @@
-# Set our default config vars in each testfile rather than `test.sh` so that we
-# can guarantee the env no matter what order the tests are run.
+###########################################################################
+# Integration tests for core functionality. Will be sourced by `test.sh`. #
+###########################################################################
+
+# Restart server and set default config vars in each testfile rather than
+# `test.sh` so that we can guarantee a blank slate.
 <<EOF > $CONF
 DEBUG=1
 typeset -ga DEBUG_TRACE_FUNCS

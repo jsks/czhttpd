@@ -1,3 +1,7 @@
+#######################################################################
+# Integration tests for czhttpd modules. Will be sourced by `test.sh` #
+#######################################################################
+
 # Start first making sure modules stay disabled when loaded
 <<EOF > $CONF
 DEBUG=1

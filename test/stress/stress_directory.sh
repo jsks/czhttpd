@@ -1,3 +1,7 @@
+###############################################################
+# Stress test directory serving. Will be sourced by `test.sh` #
+###############################################################
+
 <<EOF > $CONF
 MAX_CONN=12
 HTTP_KEEP_ALIVE=1
