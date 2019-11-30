@@ -39,7 +39,7 @@ function start_server() {
 }
 
 function stop_server() {
-    if [[ -z $PID ]] || ! alive $PID; then
+    if [[ -z $PID || $PID == 0 ]] || ! alive $PID; then
         return 0
     fi
 
@@ -49,7 +49,7 @@ function stop_server() {
 }
 
 function heartbeat() {
-    repeat 3; do
+    repeat 5; do
         sleep 0.1
         if ! alive $PID; then
             (( PORT++ ))

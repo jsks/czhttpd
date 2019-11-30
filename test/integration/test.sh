@@ -241,9 +241,6 @@ print space > $TESTROOT/file\ space.txt
 print goodbye > $TESTROOT/.dot.txt
 ln -s $TESTROOT/file.txt $TESTROOT/link
 
-start_server
-heartbeat
-
 for i in ${1:-$TEST_DIR/test_*.sh}; do
     (( VERBOSE )) && print "$fg_bold[magenta]${i:t}$fg_no_bold[white]"
     source $i

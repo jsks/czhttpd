@@ -20,7 +20,10 @@ FOLLOW_SYMLINKS=0
 HTML_CACHE=0
 LOG_FILE="/dev/null"
 EOF
-reload_conf
+
+stop_server
+start_server
+heartbeat
 
 # Let's check normal file/dir serving first with a default conf
 describe "Check index file"

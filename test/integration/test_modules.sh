@@ -5,6 +5,16 @@ typeset -ga DEBUG_TRACE_FUNCS
 DEBUG_TRACE_FUNCS=($TRACE_FUNCS)
 source $SRC_DIR/modules/debug.sh
 
+MAX_CONN=1
+PORT=$PORT
+IP_REDIRECT="127.0.0.1"
+HTTP_TIMEOUT=2
+HTTP_RECV_TIMEOUT=1
+HTTP_BODY_SIZE=16384
+HTTP_CACHE=0
+HTML_CACHE=0
+LOG_FILE="/dev/null"
+
 typeset -g URL_REWRITE=0
 typeset -g CGI_ENABLE=0
 typeset -g COMPRESS=0
@@ -18,7 +28,10 @@ source $SRC_DIR/modules/url_rewrite.sh
 source $SRC_DIR/modules/cgi.sh
 source $SRC_DIR/modules/compress.sh
 EOF
-reload_conf
+
+stop_server
+start_server
+heartbeat
 
 # Disabled url_rewrite
 describe "URL rewrite is loaded but disabled"
