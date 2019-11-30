@@ -26,8 +26,6 @@ image](https://hub.docker.com/r/jsks/czhttpd) available if the version
 shipped by your OS is older.
 
 ```sh
-$ docker pull jsks/czhttpd
-
 # Launch default directory listing of czhttpd files
 $ docker run -p 8080:8080 -it jsks/czhttpd
 
@@ -41,9 +39,6 @@ When available:
 
 - `file` is used for fallback mime-type support
 - `ifconfig` is used on macOS/*BSD when `IP_REDIRECT` is not set
-
-Additionally, running the full test suite requires `md5sum`/`md5` and
-`vegeta`.
 
 ### Features
 
@@ -70,7 +65,9 @@ files.
 
 By default, czhttpd searches for `main.conf` in
 `~/.config/czhttpd/conf/`. An alternative configuration file can be
-specified with the commandline option `-c`.
+specified with the commandline option `-c`. If no file is found, then
+czhttpd will simply use the defaults listed in the sample
+`conf/main.conf`.
 
 #### Live Reload
 
@@ -80,6 +77,32 @@ signal is sent to the parent czhttpd pid. Ex:
 
 ```sh
 $ kill -HUP <czhttpd pid>
+```
+
+### Testing
+
+Integration and benchmarking stress tests are available and can be
+invoked either directly or through the provided Makefile. Running the
+full test suite requires `md5sum`/`md5` and
+[vegeta](https://github.com/tsenart/vegeta).
+
+```sh
+# Integration tests. Log file saved as `./test.log`
+$ make test
+
+# Stress tests with vegeta. Log file saved as `./stress.log`
+$ make stress
+```
+
+The results from the latter tests are saved in `test/stress/report`
+and can be used by `vegeta report`. Additionally, html plots will be
+automatically created and saved in `test/stress/html`.
+
+Invoke the scripts directly for a full list of additional options.
+
+```sh
+$ test/integration/test.sh --help
+$ test/stress/stress.sh --help
 ```
 
 ---
