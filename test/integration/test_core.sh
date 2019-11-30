@@ -181,7 +181,7 @@ check --header "If-None-Match: hello-world" 127.0.0.1:$PORT/link \
       --http_code 200
 
 # Check parsing request message body
-describe "Fixed request body too large"
+describe "Fixed request body larger than HTTP_BODY_SIZE"
 check --data 'Hello World!' 127.0.0.1:$PORT \
       --http_code 413
 
