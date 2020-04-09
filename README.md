@@ -23,7 +23,8 @@ the current directory.
 The czhttpd script is completely standalone. The only dependency is
 zsh version **5.6 or higher**. There is a [docker
 image](https://hub.docker.com/r/jsks/czhttpd) available if the version
-shipped by your OS is older.
+shipped by your OS is older or if it lacks the [tcp 
+module](http://zsh.sourceforge.net/Doc/Release/Zsh-Modules.html).
 
 ```sh
 # Launch default directory listing of czhttpd files
