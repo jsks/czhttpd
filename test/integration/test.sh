@@ -109,12 +109,10 @@ function check() {
     local -A opts
     local -a assert_strs
     local output i req_rv
+    local -i pause
 
     (( STATS[count]++ )) || :
-    if [[ -n ${STEPWISE[(r)$STATS[count]]} ||
-              ${STEPWISE[(r)$DESC_STR]} ]]; then
-        local pause=1
-    fi
+    [[ -n ${STEPWISE[(r)$STATS[count]]} || ${STEPWISE[(r)$DESC_STR]} ]] && pause=1
 
     zparseopts -E -D -A opts -file_compare: -header_compare: -size_download: \
                -http_code: -fail

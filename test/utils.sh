@@ -63,6 +63,12 @@ function heartbeat() {
     return 1
 }
 
+function restart_server() {
+    stop_server
+    start_server
+    heartbeat
+}
+
 function reload_conf() {
     kill -HUP $PID
     heartbeat

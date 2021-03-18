@@ -32,10 +32,7 @@ source $SRC_DIR/modules/url_rewrite.sh
 source $SRC_DIR/modules/cgi.sh
 source $SRC_DIR/modules/compress.sh
 EOF
-
-stop_server
-start_server
-heartbeat
+restart_server
 
 # Disabled url_rewrite
 describe "URL rewrite is loaded but disabled"

@@ -24,12 +24,9 @@ FOLLOW_SYMLINKS=0
 HTML_CACHE=0
 LOG_FILE="/dev/null"
 EOF
+restart_server
 
-stop_server
-start_server
-heartbeat
-
-# Let's check normal file/dir serving first with a default conf
+# Check normal file/dir serving first with a default conf
 describe "Check index file"
 check --header 'keep-alive' 127.0.0.1:$PORT \
       --http_code 200 \
@@ -87,7 +84,7 @@ describe "HTTP/1.0 request"
 check --http 1.0 127.0.0.1:$PORT \
       --http_code 505
 
-# Finally, check that our headers are being set properly
+# Finally, check that the headers are being set properly
 describe "Client Connection: close"
 check --header 'Connection: close' 127.0.0.1:$PORT \
       --http_code 200 \
@@ -105,22 +102,18 @@ check --header 'Host: SuperAwesomeServ' 127.0.0.1:$PORT \
 
 rm $TESTROOT/index.html
 
-# Restart our server so that DOCROOT is pointing to a single file
-stop_server
+# Restart server so that DOCROOT is pointing to a single file
 TESTROOT=$TESTROOT/file.txt
-start_server
-heartbeat
+restart_server
 
-describe "Check serving single file"
+describe "Check DOCROOT serving single file"
 check 127.0.0.1:$PORT \
       --http_code 200 \
       --file_compare $TESTROOT \
       --header_compare 'Content-type: text/plain'
 
-stop_server
 TESTROOT=${TESTROOT:h}
-start_server
-heartbeat
+restart_server
 
 <<EOF > $CONF
 DEBUG=1
@@ -141,7 +134,7 @@ describe "Check maxed out connections"
 check 127.0.0.1:$PORT \
       --http_code 503
 
-# Let's enable some non-default config options
+# Enable some non-default config options
 <<EOF > $CONF
 DEBUG=1
 typeset -ga DEBUG_TRACE_FUNCS
@@ -158,8 +151,8 @@ HTML_CACHE=1
 EOF
 reload_conf
 
-# Let's check that czhttpd is caching html files. The only way really is to see
-# if the file is being sent with fixed length rather than chunked.
+# Check that czhttpd is caching html files. The only way really is to see if
+# the file is being sent with fixed length rather than chunked.
 describe "HTML cache request"
 check 127.0.0.1:$PORT \
       --http_code 200 \
