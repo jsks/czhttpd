@@ -406,19 +406,6 @@ function http_listen() {
     fi
 }
 
-function parse_ztcp() {
-    unset client_host; typeset -g client_host
-    private sessions conn_line
-
-    sessions=$(ztcp -L)
-    for conn_line in ${(f@)sessions}; do
-        if [[ $conn_line[3] == "I" ]]; then
-            client_host=${conn_line[(w)5]}
-            break
-        fi
-    done
-}
-
 # Parse client requests
 #
 # Would be marginally quicker to use sysread + we would have better
@@ -810,7 +797,6 @@ function TRAPHUP() {
 function cz_init() {
     LOG_FORMAT=( '[$cur_time]'
                  '[pid: ${pid:-$sysparams[pid]}]'
-                 '$client_host'
                  '$req_headers[method]'
                  '$req_headers[url]'
                  '$req_headers[version]' )
@@ -889,8 +875,6 @@ while :; do
      trap '' PIPE
 
      setopt err_return
-
-     parse_ztcp
 
      while :; do
          # err_return does not work in condition expressions, see:
