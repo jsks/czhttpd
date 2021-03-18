@@ -12,14 +12,12 @@ HTTP_CACHE=0
 HTML_CACHE=0
 EOF
 
-stop_server
 TESTROOT=$root
-start_server
-heartbeat
+restart_server
 
 # Default directory listing
 describe "Default directory serving"
-attack defaults_dir
+attack default_directory
 
 # Cache
 <<EOF > $CONF
@@ -33,8 +31,8 @@ HTML_CACHE=1
 EOF
 reload_conf
 
-describe "Directory listing with cache"
-attack cache_dir
+describe "Directory serving with caching"
+attack cache_directory
 
 # Compress directory
 <<EOF > $CONF
@@ -57,8 +55,8 @@ source $SRC_DIR/modules/compress.sh
 EOF
 reload_conf
 
-describe "Directory listing compression"
-attack compress_dir
+describe "Directory serving with compression"
+attack compress_directory
 
 # Compress directory with cache
 <<EOF > $CONF
@@ -81,7 +79,7 @@ source $SRC_DIR/modules/compress.sh
 EOF
 reload_conf
 
-describe "Directory listing compression+cache"
-attack compress_cache_dir
+describe "Directory serving compression+cache"
+attack compress+cache_directory
 
-vegeta plot $REPORT_DIR/*_dir.bin > $HTML_DIR/directory_listing.html
+vegeta plot $REPORT_DIR/*_directory.bin > $HTML_DIR/directory_listing.html

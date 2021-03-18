@@ -12,14 +12,11 @@ HTTP_CACHE=0
 HTML_CACHE=0
 EOF
 
-stop_server
 TESTROOT=$root/test.html
-start_server
-heartbeat
+restart_server
 
-# Default file listing
-describe "Default file serving"
-attack defaults_file
+describe "Default file serving with HTTP keep-alive"
+attack -keepalive=true default_keep-alive_file
 
 # Disable keep-alive
 <<EOF > $CONF
@@ -33,8 +30,8 @@ HTML_CACHE=0
 EOF
 reload_conf
 
-describe "Disabled keep-alive"
-attack no_keep-alive_file
+describe "Default file serving without HTTP keep-alive"
+attack default_no_keep-alive_file
 
 # Single file compress
 <<EOF > $CONF
@@ -80,7 +77,7 @@ EOF
 reload_conf
 
 describe "Single file compression+cache"
-attack compress_cache_file
+attack compress+cache_file
 
 # Finally
-vegeta plot $REPORT_DIR/*_file.bin > $HTML_DIR/file_listing.html
+vegeta plot $REPORT_DIR/*_file.bin > $HTML_DIR/file_serving.html

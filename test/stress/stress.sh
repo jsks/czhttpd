@@ -9,8 +9,6 @@ if [[ -t 1 ]] && (( $terminfo[colors] >= 8 )); then
     colors
 fi
 
-which vegeta >/dev/null || error "Missing vegeta, unable to run stress tests"
-
 typeset -g VEGETA_OPTS VERBOSE DURATION
 
 # Output directories
@@ -23,6 +21,8 @@ source $STRESS_DIR/../utils.sh
 
 mkdir -p $TESTTMP $TESTROOT
 : >> $CONF
+
+which vegeta >/dev/null || error "Missing vegeta, unable to run stress tests"
 
 function help() {
 <<EOF
@@ -48,9 +48,9 @@ exit
 
 function attack() {
     echo "GET http://127.0.0.1:$PORT/" | \
-        vegeta attack -name=$1 "${=VEGETA_OPTS}" > $REPORT_DIR/$1.bin
+        vegeta attack -name=${@[-1]} "${=VEGETA_OPTS}" ${@[1,-2]} > $REPORT_DIR/${@[-1]}.bin
 
-    (( VERBOSE )) && vegeta report $REPORT_DIR/$1.bin
+    (( VERBOSE )) && vegeta report $REPORT_DIR/${@[-1]}.bin
 
     return 0
 }
@@ -87,7 +87,7 @@ done
 : ${DURATION:="5s"}
 : ${VERBOSE:=0}
 
-VEGETA_OPTS="-duration=$DURATION -http2=false -timeout=10s"
+VEGETA_OPTS="-duration=$DURATION -http2=false -timeout=10s -keepalive=false"
 
 # Preserve TESTROOT across tests
 root=$TESTROOT
@@ -109,5 +109,3 @@ for i in ${1:-$STRESS_DIR/stress_*.sh}; do
     print "$fg_bold[magenta]${i:t}$fg_no_bold[white]"
     source $i
 done
-
-vegeta plot $REPORT_DIR/*.bin > $HTML_DIR/full.html
