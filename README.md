@@ -1,6 +1,6 @@
 # czhttpd
 
-[![Build Status](https://travis-ci.org/jsks/czhttpd.svg?branch=master)](https://travis-ci.org/jsks/czhttpd)
+![ci workflow](https://github.com/jsks/czhttpd/actions/workflows/ci.yml/badge.svg)
 
 Simple http server written in 99.9% pure zsh
 
@@ -22,7 +22,7 @@ the current directory.
 
 The czhttpd script is completely standalone. The only dependency is
 zsh version **5.6 or higher**. There is a [docker
-image](https://hub.docker.com/r/jsks/czhttpd) available if the version
+image](https://github.com/jsks/czhttpd/pkgs/container/czhttpd) available if the version
 shipped by your OS is older or if it lacks the [tcp 
 module](http://zsh.sourceforge.net/Doc/Release/Zsh-Modules.html).
 
