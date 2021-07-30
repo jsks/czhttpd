@@ -1,5 +1,8 @@
 name: CI
-on: [ push ]
+on:
+  push:
+  schedule:
+    - cron: '26 2 3 * *'
 
 jobs:
   push:
