@@ -1,0 +1,28 @@
+name: CI
+on: [ push ]
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Build docker image
+        run: docker build -t czhttpd .
+
+      - name: Run integration tests
+        run: docker run czhttpd make
+
+      - name: Log in to container registry
+        run: "echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+
+      - name: Push image to container repo
+        run: |
+          target=ghcr.io/${{github.repository_owner}}/czhttpd
+          docker tag czhttpd $target
+          docker push $target
