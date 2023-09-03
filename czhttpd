@@ -494,7 +494,6 @@ function parse_req_body_chunked() {
         done
 
         (( total > HTTP_BODY_SIZE )) && { error_headers 413; return 1 }
-        unset line
     done
 
     error_headers 400
