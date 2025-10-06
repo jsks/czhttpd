@@ -74,7 +74,7 @@ function chttp::parse_args() {
     local -A opts
     local i method version
 
-    zparseopts -D -A  opts -verbose v -header+:=__ADD_HEADERS h+:=__ADD_HEADERS -method: m: -http: t: -output: o: -data: d: -help -chunked c || ctcp::error "Failed to parse args"
+    zparseopts -D -A  opts -- -verbose v -header+:=__ADD_HEADERS h+:=__ADD_HEADERS -method: m: -http: t: -output: o: -data: d: -help -chunked c || ctcp::error "Failed to parse args"
 
     for i in ${(k)opts}; do
         case $i in

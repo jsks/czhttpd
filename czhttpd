@@ -246,7 +246,7 @@ function parse_args() {
     local -A opts
     private i
 
-    zparseopts -D -A opts c: p: h v || error "Failed to parse arguments" 2>/dev/null
+    zparseopts -D -A opts -- c: p: h v || error "Failed to parse arguments" 2>/dev/null
 
     for i in ${(kM)opts}; do
         case $i in

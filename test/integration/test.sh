@@ -114,7 +114,7 @@ function check() {
     (( STATS[count]++ )) || :
     [[ -n ${STEPWISE[(r)$STATS[count]]} || ${STEPWISE[(r)$DESC_STR]} ]] && pause=1
 
-    zparseopts -E -D -A opts -file_compare: -header_compare: -size_download: \
+    zparseopts -E -D -A opts -- -file_compare: -header_compare: -size_download: \
                -http_code: -fail
 
     output="$TESTTMP/${@[-1]:t}.output"
@@ -203,7 +203,7 @@ $fg[magenta]Avg Times: $fg_bold[white]$(avg CONNECT_TIMES) $fg_no_bold[white]con
 EOF
 }
 
-zparseopts -D -A opts -verbose v -stepwise: s: -trace: t: -log: l: -port: p: -help h || error "Failed to parse args"
+zparseopts -D -A opts -- -verbose v -stepwise: s: -trace: t: -log: l: -port: p: -help h || error "Failed to parse args"
 
 for i in ${(k)opts}; do
     case $i in

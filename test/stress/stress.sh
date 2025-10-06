@@ -61,7 +61,7 @@ function describe() {
     return 0
 }
 
-zparseopts -D -A opts -duration: d: -verbose v -log: l: -port: p: -help h || error "Failed to parse args"
+zparseopts -D -A opts -- -duration: d: -verbose v -log: l: -port: p: -help h || error "Failed to parse args"
 
 for i in ${(k)opts}; do
     case $i in
