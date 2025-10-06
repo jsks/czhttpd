@@ -2,7 +2,7 @@ name: CI
 on:
   push:
   schedule:
-    - cron: '26 2 3 * *'
+    - cron: '26 2 3 */3 *'
 
 jobs:
   push:
